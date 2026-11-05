@@ -1,0 +1,4 @@
+ultralytics
+openvino
+mediapipe
+PySide6
