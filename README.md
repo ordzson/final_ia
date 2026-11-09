@@ -2,7 +2,7 @@
 
 Aplicación de escritorio que abre la cámara, detecta objetos en vivo y dibuja sobre el video una caja, la etiqueta en español y el porcentaje de confianza de cada detección.
 
-- **Objetos:** YOLOv8n (preentrenado en COCO), acelerado en CPU con OpenVINO.
+- **Objetos:** YOLO26s a 640 en el perfil Windows `accurate`, preentrenado en COCO y ejecutado en CPU con OpenVINO FP32. YOLOv8n permanece en los perfiles anteriores.
 - **Rostros:** MediaPipe BlazeFace.
 - **Interfaz:** PySide6 (Qt 6).
 
@@ -60,6 +60,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
 La exportación puede reinstalar otras variantes de OpenCV; volver a ejecutar el instalador restaura la variante headless.
+
+El perfil Windows actual `accurate` necesita además `models/yolo26s.pt` y `models/yolo26s_640_openvino_model/`, incluidos en esta copia. Para regenerarlo si faltan, descarga el `.pt` de los [assets oficiales](https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26s.pt), conserva los modelos originales y exporta una copia en `.venv/export/yolo26s_640.pt`:
+
+```powershell
+New-Item -ItemType Directory -Path .venv\export -Force | Out-Null
+Copy-Item -LiteralPath models\yolo26s.pt -Destination .venv\export\yolo26s_640.pt
+.\.venv\Scripts\python.exe -c "from ultralytics import YOLO; YOLO('.venv/export/yolo26s_640.pt').export(format='openvino', imgsz=640, batch=1, dynamic=False, quantize=32, half=False, nms=None)"
+```
+
+Esto genera `.venv/export/yolo26s_640_openvino_model/`. Copia esa carpeta a `models/` solo si falta el destino, manteniendo el tamaño 640 del perfil. El lock Windows fija la versión de Ultralytics usada. No se necesita CLIP ni un dataset para ejecutar el modelo ya exportado.
 
 ### Linux (Bash)
 
@@ -128,7 +138,9 @@ La línea base anterior, a 1280×720, fue **7.5 FPS General** y **9.3 Universita
 
 Con los ajustes de CPU, el hilo de inferencia y el perfil opcional `fast` 320, una medición posterior dio **17.90 FPS General** (30 s) y **19.01 FPS Universitario** (20 s), con captura real 640×480 y 2 s iniciales excluidos. Cuenta resultados nuevos aceptados y dibujados. Hubo variación entre corridas: un primer ensayo asíncrono dio 6.54/15.68 FPS.
 
-La sesión posterior de **diez minutos** terminó con **10,513 resultados** y ningún error registrado, pico RSS **649.36 MiB**. El promedio Uni fue **17.71 FPS**; General ocupó solo 27 s entre cambios de modo y promedió **14.89 FPS**. Hubo intervalos de Uni inferiores a 15 mientras se grababa. El usuario pidió conservar estos ajustes; no se garantiza ≥15 sostenidos con grabación. Estos FPS del perfil `fast` no se atribuyen al perfil predeterminado `detail`. La prueba con objetos llegó a 50 puntos e insignia; el resultado 60/60 y la revisión de cuadernos de tapa dura confundidos con celulares siguen abiertos.
+La sesión posterior de **diez minutos** terminó con **10,513 resultados** y ningún error registrado, pico RSS **649.36 MiB**. El promedio Uni fue **17.71 FPS**; General ocupó solo 27 s entre cambios de modo y promedió **14.89 FPS**. Hubo intervalos de Uni inferiores a 15 mientras se grababa. El usuario pidió entonces conservar esos ajustes; no se garantiza ≥15 sostenidos con grabación. Estos FPS pertenecen únicamente a `fast`. La prueba con objetos llegó a 50 puntos e insignia; el resultado 60/60 y la validación de cuadernos en nuevas escenas siguen abiertos.
+
+**Prioridad posterior del usuario: reconocimiento antes que FPS.** Windows usa ahora por defecto `accurate`, YOLO26s 640. En las cuatro fotos del mismo cuaderno cerrado acertó 4/4 frente a 0/4 del anterior; conserva los 13/13 celulares de esa muestra. En 45 imágenes públicas reservadas reconoció 16/23 laptops frente a 12/23. Sigue fallando con páginas abiertas y no mejora todas las clases. La cámara real midió alrededor de **3–4 FPS** con este modelo mayor; las cifras rápidas anteriores pertenecen a `fast`. Consulta [VALIDACION_MODELO.md](VALIDACION_MODELO.md) para conteos, falsos positivos y límites.
 
 La optimización conserva la inferencia FP32 y todas las funciones. Windows fija OpenVINO a CPU y un hilo PyTorch para evitar competencia entre motores. YOLO y BlazeFace se ejecutan en un `QThread`, con una sola inferencia en curso; captura, puntaje y widgets permanecen en la interfaz. Al cambiar controles se descartan resultados de configuraciones anteriores. El dibujo RGB32 conserva los canales de color de 8 bits. Un repintado de la misma imagen no cuenta como otro resultado procesado.
 
@@ -162,25 +174,28 @@ En Windows, para usar la cámara integrada:
 .\.venv\Scripts\python.exe tests\test_scoring.py
 .\.venv\Scripts\python.exe tests\test_app.py
 .\.venv\Scripts\python.exe tests\test_compare_models.py
+.\.venv\Scripts\python.exe tests\test_evaluate_detection.py
 ```
 
-Hay **29 pruebas del producto verificadas**: 17 de puntaje/reloj y 12 de interfaz Qt, más una prueba de captura múltiple de la herramienta de comparación. Las de Qt usan cámara y detecciones sintéticas; no acreditan detección con objetos reales.
+Hay **29 pruebas del producto verificadas**: 17 de puntaje/reloj y 12 de interfaz Qt, más cuatro pruebas del capturador y contratos de matching del evaluador. Las de Qt usan cámara y detecciones sintéticas; no acreditan detección con objetos reales.
 
 ### Perfiles de detección
 
 | Perfil | Entrada | Uso |
 |---|---|---|
-| `detail` | 480×480 | Predeterminado; conserva la exportación original |
-| `fast` | 320×320 | Opcional para reducir cálculo; puede perder objetos pequeños o lejanos |
+| `accurate` | 640×640, YOLO26s | Predeterminado Windows; prioriza distinguir cuaderno y laptop; más lento |
+| `detail` | 480×480, YOLOv8n | Modelo original; predeterminado Linux |
+| `fast` | 320×320, YOLOv8n | Alternativa para recuperar los FPS anteriores |
 
-Los perfiles conservan los mismos pesos YOLOv8n y clases, FP32 sin cuantización, BlazeFace, controles y reglas de puntaje. Reducir la entrada **puede reducir la precisión** aunque las funciones sigan disponibles. El perfil rápido no se activa por defecto hasta validar sus FPS y los objetos reales.
+Los tres perfiles conservan las 13 clases de la app, FP32 sin cuantización, BlazeFace, controles y reglas de puntaje. `accurate` cambia los pesos a YOLO26s; `detail` y `fast` conservan YOLOv8n. La calidad depende también de la clase, vista y distancia: mayor entrada no garantiza acertar cada imagen.
 
 ```powershell
+.\.venv\Scripts\python.exe app.py --camera 1 --quality accurate --resolution 640x480
 .\.venv\Scripts\python.exe app.py --camera 1 --quality detail --resolution 640x480
 .\.venv\Scripts\python.exe app.py --camera 1 --quality fast --resolution 640x480
 ```
 
-`--resolution 640x480|1280x720` cambia la resolución solicitada a la cámara. `--quality detail|fast` cambia la entrada del detector; son ajustes independientes. Comprueba siempre qué resolución entrega el driver.
+`--resolution 640x480|1280x720` cambia la resolución solicitada a la cámara. `--quality accurate|detail|fast` selecciona el modelo y su entrada; son ajustes independientes. Comprueba siempre qué resolución entrega el driver.
 
 En Linux:
 
@@ -211,7 +226,9 @@ Para comprobar una confusión del modelo, cierra la otra ventana que use la cám
 .\.venv\Scripts\python.exe tools\compare_models.py --capture --camera 1 --input .venv\verification\model_samples
 ```
 
-Selecciona el objeto real en la lista superior y guarda tres muestras de cuaderno y dos de celular. Cada pulsación guarda un PNG distinto sin recuadros ni texto, y el botón indica el total. Al completar las muestras se cierra la ventana y se comparan los mismos frames con ambos perfiles. `comparison.json` conserva cajas y confianza desde 0.1 e indica cuáles superarían el umbral visible 0.35; no es una medición de mAP. Para repetir solo la comparación sin cámara, usa el mismo comando sin `--capture`.
+Selecciona el objeto real en la lista superior y guarda tres muestras de cuaderno y dos de celular. Cada pulsación guarda un PNG distinto sin recuadros ni texto, y el botón indica el total. Al completar las muestras se cierra la ventana y se comparan los mismos frames con todos los perfiles configurados. `comparison.json` conserva cajas y confianza desde 0.1 e indica cuáles superarían el umbral visible 0.35; no es una medición de mAP. Para repetir solo la comparación sin cámara, usa el mismo comando sin `--capture`.
+
+Para recoger cuadernos y laptops sin límite ni cierre automático, usa `--capture-only --quality accurate` en lugar de `--capture`. **B** elige cuaderno, **L** laptop y **C** celular; selecciona siempre el objeto real antes de guardar. Cerrar termina sin comparar. Las etiquetas por imagen no son cajas de entrenamiento. Consulta [DATASET_RECONOCIMIENTO.md](DATASET_RECONOCIMIENTO.md) para preparar un dataset propio y [VALIDACION_MODELO.md](VALIDACION_MODELO.md) para la evaluación actual.
 
 Añade `--native` para comprobar también `models/yolov8n.pt` a entrada cuadrada 480 FP32. La prueba con 35 fotos reales reprodujo cuaderno→laptop también en ese original; los resultados y sus límites están en `VALIDACION_MODELO.md`. La etiqueta «Libro / Cuaderno» no crea una clase entrenada de cuaderno.
 

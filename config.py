@@ -6,10 +6,12 @@ ROOT = Path(__file__).resolve().parent
 
 # --- Modelos ---
 MODEL_PROFILES = {
+    "accurate": (ROOT / "models" / "yolo26s_640_openvino_model", 640),
     "detail": (ROOT / "models" / "yolov8n_openvino_model", 480),
     "fast": (ROOT / "models" / "yolov8n_320_openvino_model", 320),
 }
-DEFAULT_QUALITY = "detail"
+# En Windows se prioriza distinguir cuaderno/laptop; Linux conserva su perfil verificado.
+DEFAULT_QUALITY = "accurate" if sys.platform == "win32" else "detail"
 MODEL_PATH, IMGSZ = MODEL_PROFILES[DEFAULT_QUALITY]
 FACE_MODEL_PATH = ROOT / "models" / "blaze_face_short_range.tflite"
 CONF_DEFAULT = 0.35

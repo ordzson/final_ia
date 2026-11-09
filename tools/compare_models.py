@@ -1,7 +1,9 @@
-"""Compara detail y fast con las mismas muestras reales, sin modificar sus pesos.
+"""Compara los perfiles configurados con las mismas muestras reales, sin modificar sus pesos.
 
---capture abre la app: B etiqueta cuaderno, C celular y Espacio guarda un frame
-sin cajas. Tras tres cuadernos y dos celulares se comparan ambos modelos.
+--capture abre la app: B etiqueta cuaderno, C celular, L laptop y Espacio guarda
+un frame sin cajas. Tras tres cuadernos y dos celulares se comparan todos los perfiles.
+--capture-only permite guardar muestras sin limite: cierra la ventana para terminar
+sin ejecutar la comparacion. Las laptops no tienen una meta de capturas.
 La evidencia permanece dentro de .venv, fuera de Git.
 """
 import argparse
@@ -15,6 +17,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 os.environ.setdefault("YOLO_CONFIG_DIR", str(ROOT / ".venv/ultralytics"))
 os.environ.setdefault("MPLCONFIGDIR", str(ROOT / ".venv/matplotlib"))
+SAMPLE_LABELS = {"book": "Cuaderno cerrado de tapa dura", "cell phone": "Celular real", "laptop": "Laptop real"}
+SAMPLE_SHORTCUTS = {"book": "B", "cell phone": "C", "laptop": "L"}
 
 
 def build_sample_window(detector, camera, directory, samples, threshold, auto_close=True):
@@ -40,16 +44,17 @@ def build_sample_window(detector, camera, directory, samples, threshold, auto_cl
             bar.setMovable(False)
             bar.addWidget(QLabel("  Objeto que estás mostrando:  "))
             self.sample_selector = QComboBox()
-            self.sample_selector.addItem("Cuaderno cerrado de tapa dura", "book")
-            self.sample_selector.addItem("Celular real", "cell phone")
+            for key, label in SAMPLE_LABELS.items():
+                self.sample_selector.addItem(label, key)
             bar.addWidget(self.sample_selector)
             self.sample_progress = QLabel()
             bar.addWidget(self.sample_progress)
             self.addToolBar(bar)
             self.sample_selector.currentIndexChanged.connect(
                 lambda _index: self.choose(self.sample_selector.currentData()))
-            QShortcut(QKeySequence("B"), self, lambda: self.sample_selector.setCurrentIndex(0))
-            QShortcut(QKeySequence("C"), self, lambda: self.sample_selector.setCurrentIndex(1))
+            for index, key in enumerate(SAMPLE_LABELS):
+                QShortcut(QKeySequence(SAMPLE_SHORTCUTS[key]), self,
+                          lambda selected=index: self.sample_selector.setCurrentIndex(selected))
             self.sample_button = next(b for b in self.findChildren(QPushButton) if b.text() == "Capturar")
             self.sample_button.setToolTip("Guarda un frame sin recuadros; puedes pulsar varias veces")
             self.conf_slider.setValue(round(threshold * 100))
@@ -65,12 +70,18 @@ def build_sample_window(detector, camera, directory, samples, threshold, auto_cl
 
         def choose(self, expected):
             self.expected = expected
-            label = "CUADERNO cerrado de tapa dura" if expected == "book" else "CELULAR real"
-            counts = {key: sum(s["expected"] == key for s in samples) for key in ("book", "cell phone")}
-            self.setWindowTitle(f"Comparación — {label} — Espacio o Guardar muestra")
-            self.sample_progress.setText(f"    Cuadernos: {counts['book']}/3 · Celulares: {counts['cell phone']}/2    ")
+            label = SAMPLE_LABELS[expected]
+            counts = {key: sum(s["expected"] == key for s in samples) for key in SAMPLE_LABELS}
+            title = "Comparación" if auto_close else "Captura de muestras"
+            self.setWindowTitle(f"{title} — {label} — Espacio o Guardar muestra")
+            book_count = f"{counts['book']}/3" if auto_close else str(counts["book"])
+            phone_count = f"{counts['cell phone']}/2" if auto_close else str(counts["cell phone"])
+            self.sample_progress.setText(f"    Cuadernos: {book_count} · Celulares: {phone_count}"
+                                         f" · Laptops: {counts['laptop']}    ")
             self.sample_button.setText(f"Guardar muestra ({len(samples)})")
-            self.statusBar().showMessage(f"Muestra {label}; cada pulsación guarda una foto independiente.")
+            ending = "" if auto_close else " Cierra la ventana para terminar sin comparar."
+            self.statusBar().showMessage(f"Muestra {label}; B cuaderno, C celular, L laptop."
+                                         f" Cada pulsación guarda una foto independiente.{ending}")
 
         def record_attempt(self, **fields):
             with (directory / "capture_events.jsonl").open("a", encoding="utf-8") as log:
@@ -90,7 +101,7 @@ def build_sample_window(detector, camera, directory, samples, threshold, auto_cl
                 self.record_attempt(status="write_failed")
                 return
             samples.append({"file": filename, "expected": self.expected,
-                            "description": "cuaderno cerrado de tapa dura" if self.expected == "book" else "celular real",
+                            "description": SAMPLE_LABELS[self.expected].lower(),
                             "preview_conf": self.conf})
             temporary = manifest.with_suffix(".json.tmp")
             temporary.write_text(json.dumps(samples, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -109,7 +120,12 @@ def main():
     import config
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--capture", action="store_true")
+    parser.add_argument("--capture", action="store_true",
+                        help="captura 3 cuadernos y 2 celulares y luego compara los perfiles; B/C/L eligen objeto")
+    parser.add_argument("--capture-only", action="store_true",
+                        help="captura sin limite con B cuaderno, C celular y L laptop; cerrar termina sin comparar")
+    parser.add_argument("--quality", choices=list(config.MODEL_PROFILES), default=config.DEFAULT_QUALITY,
+                        help="perfil del modelo para la vista previa durante la captura")
     parser.add_argument("--native", action="store_true",
                         help="incluye yolov8n.pt a 480 FP32 para verificar la exportacion")
     parser.add_argument("--camera", type=int, default=config.CAMERA_INDEX_DEFAULT)
@@ -128,21 +144,25 @@ def main():
     import cv2
     from detector import Detector
 
-    if args.capture:
+    if args.capture or args.capture_only:
         from PySide6.QtWidgets import QApplication
         import app
 
-        config.MODEL_PATH, config.IMGSZ = config.MODEL_PROFILES["fast"]
+        config.MODEL_PATH, config.IMGSZ = config.MODEL_PROFILES[args.quality]
         config.FRAME_W, config.FRAME_H = 640, 480
         application = QApplication([])
         app.apply_theme(application)
         detector = Detector()
 
-        window = build_sample_window(detector, args.camera, directory, samples, args.conf)
+        window = build_sample_window(detector, args.camera, directory, samples, args.conf,
+                                     auto_close=not args.capture_only)
         window.show()
         application.exec()
         detector.face.close()
         del window, detector
+        if args.capture_only:
+            print(f"SAMPLE_CAPTURE_COMPLETE count={len(samples)} path={manifest}", flush=True)
+            return
 
     if not samples:
         raise SystemExit("No hay muestras. Usa --capture para obtener imágenes etiquetadas.")
@@ -157,8 +177,8 @@ def main():
         return frame
 
     rows = []
-    for quality in ("detail", "fast"):
-        config.MODEL_PATH, config.IMGSZ = config.MODEL_PROFILES[quality]
+    for quality, profile in config.MODEL_PROFILES.items():
+        config.MODEL_PATH, config.IMGSZ = profile
         detector = Detector()
         try:
             for sample in samples:

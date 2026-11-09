@@ -4,6 +4,8 @@ Documento maestro para instancias de Claude Code. Cada instancia ejecuta **una e
 Léelo completo antes de tocar nada. Si algo aquí es ambiguo o resulta imposible, no improvises:
 documenta el problema en `PROGRESO.md` y pregunta al usuario.
 
+**Actualización autorizada — 2026-11-08:** el usuario pidió mejorar la detección y luego priorizó explícitamente distinguir laptop/cuaderno aunque bajen los FPS. Windows usa `accurate`: **YOLO26s 640 FP32**, conservando las 13 clases COCO de la app, BlazeFace y el puntaje. Linux conserva `detail`; `detail` 480 y `fast` 320 de YOLOv8n permanecen disponibles. La elección y sus limitaciones están en `VALIDACION_MODELO.md`; no hubo reentrenamiento. La meta de ≥15 FPS de la rúbrica sigue sin cumplirse con `accurate` (unos 3–4 FPS); esta prioridad temporal no cierra E5/E6 ni modifica el enunciado.
+
 ---
 
 ## 0. Cómo usar este plan
@@ -75,7 +77,7 @@ Extra por feria: hasta 25 puntos (impacto visual, originalidad, FPS, poca luz, o
 - Los permisos de cámara y aplicaciones de escritorio estaban habilitados y no se cambiaron.
 - La línea base Windows fue General **7.5 FPS** y Universitario **9.3 FPS** a 1280×720. Consulta las mediciones posteriores de `PROGRESO.md`; los FPS Linux no acreditan el rendimiento Windows.
 - Diagnóstico Windows del 2026-11-08: la captura 1280×720 entrega unos **10 FPS** aunque el driver acepte pedir 30. Pedir 960×540 devuelve 640×480 a unos **30 FPS**. Bajar la captura a VGA con modelo 480 dejó General **7.52 FPS** y Uni **8.25 FPS**; la inferencia de unos **100–125 ms** sigue siendo el principal coste. No confundir FPS de cámara con FPS de detección completa.
-- Se conserva el modelo 480 como perfil `detail` y valor predeterminado. El nuevo perfil `fast` usa una exportación **320 FP32 de los mismos pesos** en otra carpeta; no reemplaza el modelo 480. Sus FPS finales y su detección con objetos reales quedan pendientes de validar antes de cambiar el valor predeterminado.
+- Se conservan los perfiles YOLOv8n `detail` 480 y `fast` 320 FP32. La mejora posterior agrega `accurate` YOLO26s 640, predeterminado Windows para priorizar reconocimiento. Los resultados y fallos por vista constan en `VALIDACION_MODELO.md`; Linux conserva `detail`.
 - Windows captura 640×480 por defecto; Linux conserva 1280×720. `--resolution` permite elegir explícitamente una de esas dos resoluciones, independiente del tamaño de entrada del detector.
 - Comandos actuales: `.\.venv\Scripts\python.exe app.py --camera 1` y `.\.venv\Scripts\python.exe tests\test_scoring.py`.
 - Los ejemplos Bash y las rutas `.venv/bin/` del plan corresponden al procedimiento Linux. En PowerShell usa el intérprete Windows indicado arriba. Las herramientas `tools/cam_check.py`, `tools/bench.py` y `tools/live_check.py` todavía usan V4L2 y son exclusivas de Linux.
@@ -117,14 +119,14 @@ El equipo Linux original tenía restricciones de red y navegación (referencia h
 | Tema | Decisión |
 |---|---|
 | Lenguaje | Python 3.12 en venv `.venv/` dentro del proyecto |
-| Detector de objetos | Ultralytics **YOLOv8n** preentrenado en COCO-80 y exportado a **OpenVINO** (Plan A), o **YOLOv8s-World v2** con vocabulario propio y exportado a OpenVINO (Plan B) si la Etapa 0 lo aprueba |
+| Detector de objetos | Ultralytics **YOLO26s** COCO-80/OpenVINO en Windows `accurate`; YOLOv8n COCO/OpenVINO en los perfiles originales. No se activó Plan B |
 | Rostros | **MediaPipe Tasks Face Detector**, modelo `blaze_face_short_range.tflite` |
 | Interfaz | **PySide6** (Qt 6) |
 | Dibujo de overlays | **QPainter** sobre `QImage`. Nunca `cv2.putText`, que no soporta tildes ni ñ |
 | Captura de video | Windows: DirectShow (`CAP_DSHOW`), índice 1 verificado; respaldo MSMF solo si está disponible. Linux: `CAP_V4L2`; USB histórica en índice 2 |
 | OpenCV instalado | **solo** `opencv-contrib-python-headless`. La versión con GUI trae plugins de Qt que chocan con PySide6 |
 | PyTorch | variante **CPU** (`--index-url https://download.pytorch.org/whl/cpu`) para no bajar ~3 GB de CUDA |
-| Perfiles Plan A | `detail`: entrada 480, predeterminado mientras no se valide el alternativo. `fast`: entrada 320 FP32, mismos pesos y clases; puede perder objetos pequeños o lejanos |
+| Perfiles COCO | `accurate`: YOLO26s 640, predeterminado Windows. `detail`: YOLOv8n 480, predeterminado Linux. `fast`: YOLOv8n 320. Todos FP32 y con las mismas 13 clases visibles; la calidad no mejora uniformemente |
 | Bucle de video | Captura y dibujo en el hilo principal; detección en un `QThread`, con una sola inferencia en curso y descarte de resultados anteriores a un cambio de controles |
 | Umbral "NIVEL UNIVERSITARIO" | puntaje **≥ 50** (aprobado por el usuario) |
 | Idioma | Textos de la interfaz y comentarios en español; identificadores (variables, funciones, clases) en inglés |
@@ -309,12 +311,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 
 # --- Modelos ---
-# Plan A: los dos perfiles conservan las clases y los puntos.
+# Los tres perfiles conservan las clases de la app y los puntos.
 MODEL_PROFILES = {
+    "accurate": (ROOT / "models" / "yolo26s_640_openvino_model", 640),
     "detail": (ROOT / "models" / "yolov8n_openvino_model", 480),
     "fast": (ROOT / "models" / "yolov8n_320_openvino_model", 320),
 }
-DEFAULT_QUALITY = "detail"  # no cambiar sin validar rendimiento y objetos reales
+DEFAULT_QUALITY = "accurate" if sys.platform == "win32" else "detail"
 MODEL_PATH, IMGSZ = MODEL_PROFILES[DEFAULT_QUALITY]
 FACE_MODEL_PATH = ROOT / "models" / "blaze_face_short_range.tflite"
 CONF_DEFAULT = 0.35
@@ -649,7 +652,7 @@ E0 ──► E1 ─┐
 - **Argumentos de línea de comandos** (`argparse`), para que los agentes puedan verificar:
   - `--camera N`: índice inicial.
   - `--mode general|uni`: modo inicial. En E3 basta con aceptar `general`; `uni` se implementa en E4.
-  - `--quality detail|fast`: selecciona el modelo Plan A 480 o 320, respectivamente. No cambia controles, clases, rostros ni reglas de puntaje. El perfil 320 puede perder detecciones pequeñas o lejanas; validar objetos reales y FPS antes de adoptarlo como predeterminado.
+  - `--quality accurate|detail|fast`: selecciona YOLO26s 640, YOLOv8n 480 o YOLOv8n 320. Conserva controles, las 13 clases visibles, rostros y puntaje. `accurate` prioriza distinguir cuaderno/laptop en Windows, con menor velocidad y sin garantizar mejora en cada clase.
   - `--resolution 640x480|1280x720`: resolución solicitada a la cámara, independiente de la entrada del modelo. El driver puede entregar otro tamaño; anotar el efectivo.
   - `--autoshot SEG`:
     - A los SEG segundos guarda `self.grab()` (la ventana completa) en `capturas/autoshot.png`.

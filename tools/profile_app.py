@@ -41,6 +41,7 @@ def main():
         cv2.setNumThreads(args.opencv_threads)
     base_open = app.open_camera
     camera_info = {}
+    observed_modes = {}
 
     def open_camera(index):
         cap = base_open(index)
@@ -57,7 +58,8 @@ def main():
         data.update(mode=args.mode, camera=args.camera, requested_size=[args.width, args.height],
                     quality=args.quality, inference_size=config.IMGSZ,
                     capture_fps_request=args.capture_fps, opencv_threads=cv2.getNumThreads(),
-                    camera_info=camera_info)
+                    camera_info=camera_info, observed_modes=dict(observed_modes),
+                    mixed_modes=len(observed_modes) > 1)
         encoded = json.dumps(data, ensure_ascii=False, indent=2)
         print(encoded, flush=True)
         if args.out:
@@ -131,6 +133,7 @@ def main():
     def frame_processed(_groups, _size):
         if started is not None and time.perf_counter() - started >= 2:
             processed.append(time.perf_counter())
+            observed_modes[window.mode] = observed_modes.get(window.mode, 0) + 1
     window.frame_processed.connect(frame_processed)
     window.show()
     started = time.perf_counter()
@@ -140,10 +143,14 @@ def main():
         inference_failed = window._inference_error
         elapsed = time.perf_counter() - started - 2
         means = {name: statistics.mean(values) if values else None for name, values in samples.items()}
+        notes = "Etapas en paralelo; FPS cuenta resultados nuevos aceptados y dibujados."
+        if observed_modes and (len(observed_modes) > 1 or args.mode not in observed_modes):
+            notes += (" El campo mode indica el modo inicial; observed_modes cuenta los frames"
+                      " medidos en cada modo y los FPS incluyen todos ellos.")
         report(dict(fps=len(processed) / elapsed, frames=len(processed),
                     seconds=elapsed, mean_stage_ms=means,
                     inference_error=inference_failed,
-                    notes="Etapas en paralelo; FPS cuenta resultados nuevos aceptados y dibujados."))
+                    notes=notes))
         if args.out and window.last_image is not None:
             window.grab().save(str(args.out.with_suffix(".png")))
         window.close()

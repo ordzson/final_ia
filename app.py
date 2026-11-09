@@ -993,7 +993,7 @@ def main() -> None:
     ap.add_argument("--camera", type=int, metavar="N", help="índice inicial de la cámara")
     ap.add_argument("--mode", choices=list(MODE_NAMES), default="general", help="modo inicial")
     ap.add_argument("--quality", choices=list(config.MODEL_PROFILES), default=config.DEFAULT_QUALITY,
-                    help="detail: entrada 480; fast: entrada 320, más FPS y menos detalle en objetos pequeños")
+                    help="accurate: YOLO26s 640, prioriza reconocimiento; detail: YOLOv8n 480; fast: YOLOv8n 320")
     ap.add_argument("--resolution", choices=("640x480", "1280x720"),
                     help="resolución solicitada a la cámara; 720p limita esta cámara a unos 10 FPS")
     ap.add_argument("--autoshot", type=float, metavar="SEG",
