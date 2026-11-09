@@ -354,9 +354,11 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(18, 18, 18, 18)
         lay.setSpacing(8)
 
-        def title(lay: QVBoxLayout, text: str) -> None:
+        def title(lay: QVBoxLayout, text: str) -> QLabel:
             lay.addSpacing(10)
-            lay.addWidget(QLabel(text.upper(), objectName="panelTitle"))
+            label = QLabel(text.upper(), objectName="panelTitle")
+            lay.addWidget(label)
+            return label
 
         def value_grid(lay: QVBoxLayout, names: list[str]) -> list[QLabel]:
             grid = QGridLayout()
@@ -381,12 +383,23 @@ class MainWindow(QMainWindow):
         uni_lay.setContentsMargins(0, 0, 0, 0)
         uni_lay.setSpacing(8)
         title(uni_lay, "Puntaje")
-        score_rows = ["Puntaje actual", "Mejor puntaje de la sesión"]
-        if not self.live_scoring:
-            score_rows.append("Tiempo de la ronda")
-        self.score_value, self.best_value, *round_values = value_grid(uni_lay, score_rows)
-        self.round_value = round_values[0] if round_values else None
-        title(uni_lay, "Ítems visibles" if self.live_scoring else "Ítems guardados")
+        self.uni_round_check = QCheckBox("Ronda de 60 s")
+        self.uni_round_check.setChecked(not self.live_scoring)
+        self.uni_round_check.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.uni_round_check.setToolTip("Alterna entre puntaje en vivo y acumulativo. Reinicia el puntaje actual.")
+        self.uni_round_check.toggled.connect(self.set_uni_round)
+        uni_lay.addWidget(self.uni_round_check)
+        self.uni_scoring_hint = QLabel(objectName="muted")
+        self.uni_scoring_hint.setWordWrap(True)
+        uni_lay.addWidget(self.uni_scoring_hint)
+        self.score_value, self.best_value = value_grid(
+            uni_lay, ["Puntaje actual", "Mejor puntaje de la sesión"])
+        self.round_row = QWidget()
+        round_lay = QVBoxLayout(self.round_row)
+        round_lay.setContentsMargins(0, 0, 0, 0)
+        (self.round_value,) = value_grid(round_lay, ["Tiempo de la ronda"])
+        uni_lay.addWidget(self.round_row)
+        self.collected_title = title(uni_lay, "Ítems guardados")
         self.collected_label = QLabel(textFormat=Qt.TextFormat.RichText)
         uni_lay.addWidget(self.collected_label)
         lay.addWidget(self.uni_section)
@@ -815,6 +828,17 @@ class MainWindow(QMainWindow):
     def toggle_mode(self) -> None:
         self.set_mode("uni" if self.mode == "general" else "general")
 
+    def set_uni_round(self, enabled: bool) -> None:
+        live = not enabled
+        if live == self.live_scoring:
+            return
+        self.live_scoring = live
+        self.uni_scorer = UniScorer(self.detector.available_keys, live=live)
+        self.reset_uni()
+        self.last_dets = []
+        self.update_panel()
+        self.statusBar().showMessage("Puntaje actual reiniciado al cambiar la ronda de 60 s", 3000)
+
     def on_conf_changed(self, value: int) -> None:
         if self.conf != value / 100:
             self.invalidate_inference()
@@ -863,6 +887,11 @@ class MainWindow(QMainWindow):
 
     def update_panel(self) -> None:
         now = time.monotonic()
+        self.round_row.setVisible(not self.live_scoring)
+        self.collected_title.setText("ÍTEMS VISIBLES" if self.live_scoring else "ÍTEMS GUARDADOS")
+        self.uni_scoring_hint.setText(
+            "Suma mientras los objetos estén visibles." if self.live_scoring else
+            "Muestra los objetos uno por uno; los puntos se guardan durante la ronda.")
         self.fps_value.setText(f"{1 / self.fps_dt:.1f}" if self.cap is not None and self.fps_dt else "—")
         elapsed = int(now - self.session_start)
         self.time_value.setText(f"{elapsed // 60:02d}:{elapsed % 60:02d}")
@@ -879,7 +908,7 @@ class MainWindow(QMainWindow):
             self.uni_state = self.uni_scorer.advance(now)
             st = self.uni_state
             self.score_value.setText(f"{st.score} / {st.max_score}")
-            if self.round_value is not None:
+            if not self.live_scoring:
                 self.round_value.setText(clock(st.time_left) if st.phase == "running" else ROUND_STATUS[st.phase])
             self.best_value.setText(str(self.best_score))
             self.collected_label.setText(rows_html(
@@ -1000,14 +1029,17 @@ def main() -> None:
     ap.add_argument("--quality", choices=list(config.MODEL_PROFILES), default=config.DEFAULT_QUALITY,
                     help="accurate: YOLO26s 640, prioriza reconocimiento; detail: YOLOv8n 480; fast: YOLOv8n 320")
     ap.add_argument("--stationery-model", type=Path, metavar="DIR",
-                    help="usa otro detector OpenVINO de útiles")
+                    help="otro detector de útiles: directorio OpenVINO en CPU o pesos .pt en CUDA")
+    ap.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto",
+                    help="auto usa NVIDIA CUDA si está disponible; cpu conserva OpenVINO")
+    ap.add_argument("--half", action="store_true", help="usa FP16 en CUDA para reducir el coste de inferencia")
     ap.add_argument("--resolution", choices=("640x480", "1280x720"),
                     help="resolución solicitada a la cámara; 720p limita esta cámara a unos 10 FPS")
     ap.add_argument("--autoshot", type=float, metavar="SEG",
                     help="a los SEG segundos guarda capturas/autoshot.png, imprime los FPS y sale")
     args = ap.parse_args()
-    if args.stationery_model is not None and not args.stationery_model.is_dir():
-        ap.error("--stationery-model debe apuntar al directorio del modelo OpenVINO")
+    if args.stationery_model is not None and not args.stationery_model.exists():
+        ap.error("--stationery-model no existe")
 
     config.MODEL_PATH, config.IMGSZ = config.MODEL_PROFILES[args.quality]
     if args.resolution:
@@ -1018,7 +1050,7 @@ def main() -> None:
     stationery_model = args.stationery_model
     if stationery_model is None and config.STATIONERY_MODEL_PATH.is_dir():
         stationery_model = config.STATIONERY_MODEL_PATH
-    detector = Detector(stationery_model)
+    detector = Detector(stationery_model, device=args.device, half=args.half)
     cameras = probe_cameras() if args.camera is None else []
     win = MainWindow(detector, cameras, args.camera, args.mode, live_scoring=not args.uni_round)
     win.show()

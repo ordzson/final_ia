@@ -4,6 +4,8 @@ Documento maestro para instancias de Claude Code. Cada instancia ejecuta **una e
 Léelo completo antes de tocar nada. Si algo aquí es ambiguo o resulta imposible, no improvises:
 documenta el problema en `PROGRESO.md` y pregunta al usuario.
 
+**Actualización autorizada — 2026-11-09 (RTX 3080):** el usuario pidió subir todo a GitHub para ejecutarlo en otra computadora con una RTX 3080 y aprovecharla. Se añade la alternativa PyTorch CUDA con los pesos `.pt` existentes, selección `--device auto|cpu|cuda`, FP16 opcional mediante `--half`, instalador `setup_cuda.py`, verificador `tools/check_gpu.py` y pruebas de backend/instalación. Esta solicitud amplía las decisiones CPU y la estructura histórica de abajo. CPU conserva OpenVINO FP32; CUDA usa FP32 por defecto. No se ha validado físicamente la 3080 ni se cierran E5/E6 por estos cambios.
+
 **Actualización autorizada — 2026-11-08:** el usuario pidió mejorar la detección y luego priorizó explícitamente distinguir laptop/cuaderno aunque bajen los FPS. Windows usa `accurate`: **YOLO26s 640 FP32**, conservando las 13 clases COCO de la app, BlazeFace y el puntaje. Linux conserva `detail`; `detail` 480 y `fast` 320 de YOLOv8n permanecen disponibles. La elección y sus limitaciones están en `VALIDACION_MODELO.md`; no hubo reentrenamiento. La meta de ≥15 FPS de la rúbrica sigue sin cumplirse con `accurate` (unos 3–4 FPS); esta prioridad temporal no cierra E5/E6 ni modifica el enunciado.
 
 ---

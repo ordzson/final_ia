@@ -1,5 +1,15 @@
 # PROGRESO — VisionAI
 
+### Preparación para RTX 3080 y traslado por GitHub — 2026-11-09
+
+**Solicitud:** publicar todos los cambios del proyecto y preparar su ejecución en otra computadora con RTX 3080.
+
+**Cambios:** `Detector` elige CUDA cuando está disponible y carga los pesos `.pt` existentes para ambos YOLO; conserva OpenVINO en CPU y MediaPipe en CPU. `--device cuda` exige GPU, `--device cpu` permite elegir CPU y `--half` activa FP16 opcional. Se mantienen clases, puntaje y tamaños de entrada. `setup_cuda.py` crea el entorno Python 3.12 en Windows/Linux, instala PyTorch desde el índice CUDA 12.6, conserva las dependencias de cada lock salvo los pins CPU de torch/torchvision y CLIP histórico, restaura solo OpenCV contrib headless y comprueba GPU/modelos. Los locks CPU originales permanecen intactos. README incluye instalación y ejecución en el destino. `tools/check_gpu.py` prueba ambos modelos y rostros sin cámara e informa versiones y velocidad sintética.
+
+**Verificación:** pasan las cinco pruebas del backend (GPU simulada, selección de pesos para los tres perfiles, opciones CUDA en ambos modelos, rechazo de OpenVINO personalizado en CUDA y conservación de CPU), el contrato del instalador simulado en Windows/Linux, 18 casos de puntaje, 13 pruebas Qt, cuatro pruebas del capturador y los contratos del evaluador. Se cargaron los dos modelos OpenVINO reales y BlazeFace y se ejecutó una detección CPU sobre imagen negra sin errores. Se comprobó la ayuda CLI, compilación Python y `git diff --check`. Para las verificaciones que importan MediaPipe se utilizó el mismo aislamiento de audio ya documentado (`sys.modules['sounddevice'] = None` solo en el proceso de prueba), debido al bloqueo local de PortAudio. No se cambió el audio del producto.
+
+**Límites:** no hay evidencia de ejecución en una RTX 3080 ni de instalación CUDA nueva; los tests del instalador simulan comandos y no descargan dependencias. La instalación final comprueba CUDA y ejecuta los modelos en el destino. No se prometen FPS ni precisión FP16; se deben comprobar cámara y rendimiento en esa computadora. E5/E6 y validaciones físicas continúan pendientes. Se incluyen también los cambios previos del interruptor de ronda, guía/PDF de defensa y captura solicitados como parte de «todo».
+
 Bitácora compartida entre instancias. Actualízala al terminar cada etapa. Usa fechas absolutas (AAAA-MM-DD).
 Estados posibles: `pendiente` | `en curso` | `hecha` | `bloqueada`.
 
@@ -373,3 +383,13 @@ Se empezó con E5 todavía `en curso` (falta su checklist [USUARIO]), como permi
 - Prueba reservada de 40 imágenes a color. OpenVINO a confianza 0.35 e IoU mínimo 0.50 acertó 4/7 lápices, 9/9 cuadernos y 6/10 lapiceros, con un falso positivo de lapicero. Los detalles y atribuciones están en [DATASET_RECONOCIMIENTO.md](DATASET_RECONOCIMIENTO.md).
 - El modo Universitario puntúa los cinco tipos del enunciado y baja el puntaje al retirar objetos. `--uni-round` ofrece el juego acumulativo. Las pruebas de puntaje incluyen entrada, retirada y caducidad sin fotogramas.
 - `detail` queda predeterminado con el detector de útiles instalado. Con imágenes reproducidas a 640 × 480 en el Ryzen 5 3600 se midieron 17.48 FPS General y 18.72 FPS Universitario, sin errores de inferencia. Quedan pendientes los FPS con la cámara de la demo y la comprobación física de objetos y controles. La sesión de demostración y su video de respaldo siguen abiertos.
+
+### Interruptor para recuperar la ronda acumulativa — 2026-11-09
+
+**Solicitud del usuario:** recuperar desde la interfaz los 60 s para mostrar objetos uno por uno, sin tener que mantenerlos simultáneamente ante la cámara.
+
+**Implementado:** casilla **Ronda de 60 s** en el panel de puntaje universitario, con explicación visible del comportamiento. Activa la ronda histórica que ya ofrecía `--uni-round`: mochila +10, libro +20, laptop +25 y celular +5; guarda los puntos al retirar objetos, comienza con la primera presencia confirmada, termina al reunir todos o cumplirse el minuto y conserva el resultado durante 5 s. Desactivarla devuelve el puntaje en vivo con los cinco tipos actuales. El reloj y el título de ítems cambian con la selección. Alternar reinicia solo el puntaje actual y sus animaciones, conserva las estadísticas de sesión y descarta inferencias pendientes de la configuración anterior. La selección se mantiene al cambiar de modo y reiniciar estadísticas; `--uni-round` permite iniciar con la casilla activada. README actualizado.
+
+**Verificación:** pasan los 18 casos de `tests/test_scoring.py` y los 13 de `tests/test_app.py`. El nuevo caso Qt comprueba puntaje en vivo, acumulación secuencial hasta la insignia de 50 puntos, retirada sin pérdida, vencimiento del minuto y del resultado, conservación de estadísticas y selección al cambiar de modo, y vuelta al puntaje en vivo. Se amplió la prueba de generaciones obsoletas al interruptor. Revisión visual de ambos estados con datos sintéticos a 1100×700, capturas en `.venv/verification/uni_toggle_{live,round}.png`; `git diff --check` correcto.
+
+**Limitación del entorno de pruebas:** la ejecución directa de Qt se bloqueó al importar `sounddevice` desde MediaPipe, dentro de `Pa_Initialize`. Se ejecutó la suite mediante `runpy.run_path('tests/test_app.py', run_name='__main__')` con `sys.modules['sounddevice'] = None`, exclusivamente en ese proceso de pruebas. No se modificaron dependencias ni código de audio. No se probó cámara ni reconocimiento físico en esta sesión; los pendientes E5/E6 continúan abiertos.

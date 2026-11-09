@@ -116,7 +116,7 @@ def detection(key, conf=0.95):
 
 
 @contextmanager
-def fake_window(mode="general", connected=True, requested=FAKE_INDEX):
+def fake_window(mode="general", connected=True, requested=FAKE_INDEX, *, live_scoring=False):
     """Construye la ventana real con todas las entradas externas sustituidas."""
     verification = config.ROOT / ".venv" / "verification"
     verification.mkdir(parents=True, exist_ok=True)
@@ -131,7 +131,7 @@ def fake_window(mode="general", connected=True, requested=FAKE_INDEX):
         stack.enter_context(patch.object(vision_app, "time", fake_time))
         opened = stack.enter_context(patch.object(vision_app, "open_camera", return_value=camera))
         probed = stack.enter_context(patch.object(vision_app, "probe_cameras", return_value=[]))
-        win = vision_app.MainWindow(detector, camera_list, requested, mode)
+        win = vision_app.MainWindow(detector, camera_list, requested, mode, live_scoring=live_scoring)
         # Se emiten los ticks explícitamente: no hay esperas, cámara real ni medidas de FPS.
         for timer in (win.frame_timer, win.panel_timer, win.retry_timer):
             timer.stop()
@@ -212,6 +212,61 @@ def test_groups_confidence_and_modes():
         w.mode_buttons["uni"].click()
         assert w.uni_state.phase == "waiting" and w.uni_state.score == 0
         assert w.best_score == 45
+
+
+def test_uni_round_toggle_accumulates_sequential_objects():
+    with fake_window(mode="uni", live_scoring=True) as f:
+        w = f.win
+        assert not w.uni_round_check.isChecked() and w.round_row.isHidden()
+        assert w.collected_title.text() == "ÍTEMS VISIBLES"
+        f.detector.detections = [detection("laptop")]
+        tick(f)
+        tick(f, 0.35)
+        assert w.uni_state.score == 25
+        f.detector.detections = []
+        tick(f, 0.8)
+        assert w.uni_state.score == 0
+        session_start = w.session_start
+        appearances = dict(w.appearances)
+        w.uni_round_check.click()
+        assert not w.live_scoring and not w.uni_scorer.live
+        assert not w.round_row.isHidden() and w.round_value.text() == "Esperando"
+        assert w.collected_title.text() == "ÍTEMS GUARDADOS"
+        assert w.uni_state.score == 0 and w.uni_state.time_left == config.UNI_ROUND_S
+        assert w.best_score == 25 and w.session_start == session_start and w.appearances == appearances
+
+        for key, expected in (("laptop", 25), ("book", 45), ("cell phone", 50)):
+            f.detector.detections = [detection(key)]
+            tick(f)
+            tick(f, 0.35)
+            assert w.uni_state.score == expected
+            f.detector.detections = []
+            tick(f, 0.8)
+            assert w.uni_state.score == expected and w.uni_state.present == []
+        assert w.uni_state.badge and w.uni_state.phase == "running"
+        deadline = w.uni_scorer._start + config.UNI_ROUND_S
+        f.clock.set(deadline + 0.1)
+        w.update_panel()
+        assert w.uni_state.phase == "result" and w.uni_state.score == 50
+        assert w.round_value.text() == "Terminada"
+        f.clock.set(deadline + config.UNI_RESULT_S + 0.1)
+        w.update_panel()
+        assert w.uni_state.phase == "waiting" and w.uni_state.score == 0
+
+        w.toggle_mode()
+        assert w.uni_section.isHidden()
+        w.toggle_mode()
+        assert w.uni_round_check.isChecked() and not w.live_scoring
+        w.uni_round_check.click()
+        assert w.live_scoring and w.uni_scorer.live and w.round_row.isHidden()
+        assert w.uni_state.score == 0 and w.best_score == 50
+        f.detector.detections = [detection("laptop")]
+        tick(f)
+        tick(f, 0.35)
+        assert w.uni_state.score == 25
+        f.detector.detections = []
+        tick(f, 0.8)
+        assert w.uni_state.score == 0
 
 
 def test_capture_png_flash_counters_and_reset():
@@ -406,7 +461,7 @@ def test_worker_single_job_and_thread_affinity():
 
 
 def test_obsolete_generations_are_discarded():
-    for action in ("mode", "confidence", "groups", "camera", "reset"):
+    for action in ("mode", "confidence", "groups", "camera", "reset", "uni_round"):
         with fake_window() as f:
             w = f.win
             f.detector.detections = [detection("laptop")]
@@ -428,6 +483,8 @@ def test_obsolete_generations_are_discarded():
                 f.opened.return_value = FakeCamera()
                 w.start_camera(FAKE_INDEX + 1)
                 w.frame_timer.stop()
+            elif action == "uni_round":
+                w.uni_round_check.click()
             else:
                 button(w, "Reiniciar").click()
             assert w._inflight is job and w._generation != job["generation"]
@@ -513,6 +570,7 @@ def main():
     qt_app.setQuitOnLastWindowClosed(False)
     vision_app.apply_theme(qt_app)
     tests = [test_image_colors_and_buffer_ownership, test_groups_confidence_and_modes,
+             test_uni_round_toggle_accumulates_sequential_objects,
              test_capture_png_flash_counters_and_reset,
              test_low_light_with_synthetic_frames, test_missing_camera_retry_disconnect_and_reconnect,
              test_camera_discovery_and_selector_without_hardware, test_panel_clock_without_camera_frames,

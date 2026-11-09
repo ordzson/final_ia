@@ -1,15 +1,47 @@
 # VisionAI — Detector de Objetos en Tiempo Real
 
+## Instalar en la computadora con RTX 3080
+
+Descarga este repositorio completo (incluye los pesos de los modelos), instala Python **3.12 de 64 bits** y actualiza el controlador NVIDIA. Abre una terminal en la carpeta descargada.
+
+**Windows, PowerShell:**
+
+```powershell
+python.exe setup_cuda.py
+.\.venv\Scripts\python.exe app.py --device cuda --quality accurate --half --resolution 640x480
+```
+
+**Linux:**
+
+```bash
+python3.12 setup_cuda.py
+.venv/bin/python app.py --device cuda --quality accurate --half --resolution 640x480
+```
+
+En Linux instala también `libxcb-cursor0` como se indica abajo. El instalador CUDA usa las ruedas de [PyTorch CUDA 12.6](https://pytorch.org/get-started/previous-versions/), comprueba una operación en GPU y ejecuta ambos modelos y BlazeFace con imágenes sintéticas. Descarga varios GB; necesita internet. No ejecutes después `setup.ps1` o `setup.sh`: esos instaladores vuelven a PyTorch CPU. No copies `.venv` entre computadoras; se crea en el destino.
+
+La app usa NVIDIA automáticamente si PyTorch detecta CUDA. `--device cuda` exige GPU y muestra un error si no está disponible; `--device cpu` conserva OpenVINO. En CUDA se cargan `models/yolo26s.pt` para `accurate`, `models/yolov8n.pt` para `detail`/`fast` y `models/stationery.pt` para útiles. BlazeFace sigue en CPU. Los tamaños de entrada y las clases se conservan.
+
+[`--half`](https://docs.ultralytics.com/modes/predict/) activa FP16 en GPU; puede mejorar el rendimiento y reducir memoria, con posibles pequeñas diferencias de confianza. Omítelo para FP32. Empieza con `accurate` para aprovechar la 3080; prueba `detail` si necesitas más FPS. El índice de cámara depende de esa computadora: usa el selector o añade `--camera 0` (o el índice correspondiente).
+
+Para repetir la comprobación sin cámara:
+
+```powershell
+.\.venv\Scripts\python.exe tools\check_gpu.py --half
+```
+
+En Linux usa `.venv/bin/python tools/check_gpu.py --half`. La consola muestra GPU, versiones y velocidad con imagen sintética; esa cifra no representa los FPS de cámara e interfaz. **La RTX 3080 no se ha probado físicamente en el equipo de desarrollo**: mide los FPS reales en el destino con la app. Las instrucciones CPU e historial de mediciones continúan abajo.
+
 Aplicación de escritorio que abre la cámara, detecta objetos en vivo y dibuja sobre el video una caja, la etiqueta en español y el porcentaje de confianza de cada detección.
 
-- **Objetos:** YOLOv8n COCO a 480 en el perfil `detail` y un YOLOv8n a 640 entrenado para lápiz, cuaderno y lapicero. Ambos se ejecutan en CPU con OpenVINO FP32. `accurate` permite usar YOLO26s a 640 para COCO.
+- **Objetos:** YOLOv8n COCO a 480 en el perfil `detail` y un YOLOv8n a 640 entrenado para lápiz, cuaderno y lapicero. Ambos se ejecutan en CPU con OpenVINO FP32 o en NVIDIA con PyTorch CUDA. `accurate` permite usar YOLO26s a 640 para COCO.
 - **Rostros:** MediaPipe BlazeFace.
 - **Interfaz:** PySide6 (Qt 6).
 
 Tiene dos modos:
 
 - **General:** personas, rostros, celulares, laptops, mochilas, libros, mesas y otros objetos comunes.
-- **Listo para la Universidad:** en una ronda de 1 minuto, suma puntos por cada objeto universitario que se muestra frente a la cámara.
+- **Listo para la Universidad:** suma puntos por los objetos visibles o, al activar **Ronda de 60 s**, acumula los objetos que muestras uno por uno durante un minuto.
 
 ---
 
@@ -25,7 +57,7 @@ Tiene dos modos:
   sudo apt install libxcb-cursor0
   ```
 
-No hace falta GPU: todo corre en la CPU.
+No hace falta GPU: todo puede correr en CPU. Para NVIDIA usa el instalador CUDA del inicio; las instrucciones de instalación siguientes corresponden a CPU.
 
 ## 2. Instalación
 
@@ -177,7 +209,7 @@ En Windows, para usar la cámara integrada:
 .\.venv\Scripts\python.exe tests\test_evaluate_detection.py
 ```
 
-Las pruebas del producto incluyen 18 casos de puntaje y 12 de interfaz Qt, además de las pruebas del capturador y del evaluador. Las de Qt usan cámara y detecciones simuladas.
+Las pruebas del producto incluyen 18 casos de puntaje y 13 de interfaz Qt, además de las pruebas del capturador y del evaluador. Las de Qt usan cámara y detecciones simuladas.
 
 ### Perfiles de detección
 
@@ -187,7 +219,7 @@ Las pruebas del producto incluyen 18 casos de puntaje y 12 de interfaz Qt, adem�
 | `detail` | 480×480, YOLOv8n | Predeterminado con el detector de útiles instalado |
 | `fast` | 320×320, YOLOv8n | Alternativa para recuperar los FPS anteriores |
 
-Los tres perfiles ofrecen las 13 clases COCO de la app con OpenVINO FP32. El detector de útiles y BlazeFace se ejecutan junto al perfil elegido. `accurate` usa YOLO26s. `detail` y `fast` usan YOLOv8n.
+Los tres perfiles ofrecen las 13 clases COCO de la app con OpenVINO FP32 en CPU o PyTorch en CUDA. El detector de útiles y BlazeFace se ejecutan junto al perfil elegido. `accurate` usa YOLO26s. `detail` y `fast` usan YOLOv8n.
 
 ```powershell
 .\.venv\Scripts\python.exe app.py --camera 1 --quality accurate --resolution 640x480
@@ -252,6 +284,7 @@ Añade `--native` para comprobar también `models/yolov8n.pt` a entrada cuadrada
 |---|---|
 | **Cámara** | Elige la cámara. Cada vez que abres la lista, vuelve a buscar cámaras, así que aparecen también las que conectes con la app abierta. |
 | **General / Universitario** | Cambia de modo. |
+| **Ronda de 60 s** | En Universitario, activa el puntaje acumulativo para mostrar los objetos uno por uno. Al alternar reinicia el puntaje actual y conserva las estadísticas de sesión. |
 | **Objetos / Personas / Rostros** | Muestran u ocultan cada tipo de detección. Solo funcionan en modo General. |
 | **Confianza** | Confianza mínima para mostrar una detección. Más alta: menos detecciones, pero más seguras. |
 | **Capturar** | Guarda la imagen con las detecciones en `capturas/AAAAMMDD_HHMMSS.png`. |
@@ -295,7 +328,9 @@ El puntaje suma los tipos de objetos visibles y se actualiza cuando los muestras
 
 - El HUD muestra hasta **75 puntos**, el nivel y un chip por tipo de objeto. A partir de 50 puntos aparece **NIVEL UNIVERSITARIO**.
 - Una detección suma después de 0.3 s de presencia estable. Al retirar el objeto, sus puntos vencen tras 0.7 s sin detección.
-- `--mode uni --uni-round` abre el juego acumulativo anterior, con reloj de 60 s y sus cuatro ítems.
+- Activa **Ronda de 60 s** en el panel universitario para recuperar el juego acumulativo anterior: mochila (+10), libro (+20), laptop (+25) y celular (+5), hasta 60 puntos. Puedes mostrarlos **uno por uno** y retirarlos al encenderse su chip; los puntos quedan guardados. El reloj arranca con el primer objeto confirmado. La ronda termina al reunir todos o al cumplirse el minuto, muestra el resultado durante 5 s y vuelve a cero.
+- Al desactivar el interruptor vuelves al puntaje en vivo de los cinco tipos de la tabla. Alternarlo reinicia el puntaje actual, conservando mejor puntaje, apariciones y capturas de la sesión. La elección se mantiene al cambiar entre General y Universitario o reiniciar estadísticas, hasta cerrar la app.
+- `--mode uni --uni-round` permite arrancar con el interruptor activado; sin ese argumento, queda desactivado.
 
 ### Poca luz
 

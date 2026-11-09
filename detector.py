@@ -1,4 +1,4 @@
-"""Detección de objetos (YOLO en OpenVINO) y de rostros (MediaPipe) sobre frames BGR."""
+"""Detección YOLO en OpenVINO CPU o CUDA y rostros MediaPipe sobre frames BGR."""
 import time
 import sys
 import threading
@@ -47,14 +47,39 @@ def _overlaps_notebook(book: Det, notebook: Det) -> bool:
     return intersection >= 0.7 * union
 
 
+def inference_backend(device: str) -> str:
+    if device not in {"auto", "cpu", "cuda"}:
+        raise ValueError(f"Dispositivo no válido: {device}")
+    if device == "auto":
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    if device == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA no está disponible. Ejecuta setup_cuda.py y comprueba el controlador NVIDIA.")
+    return device
+
+
 class Detector:
-    def __init__(self, stationery_path: Path | None = None) -> None:
+    def __init__(self, stationery_path: Path | None = None, device: str = "auto",
+                 half: bool = False) -> None:
         """Carga YOLO, BlazeFace y, si se indica, el detector de lápices y cuadernos."""
         # Un hilo para pre/postproceso evita competir con OpenVINO en esta CPU Windows.
+        self.device = inference_backend(device)
         self._predict_options = {"device": "intel:CPU"} if sys.platform == "win32" else {}
-        if sys.platform == "win32":
+        model_path = config.MODEL_PATH
+        if self.device == "cuda":
+            model_path = config.ROOT / "models" / ("yolo26s.pt" if config.IMGSZ == 640 else "yolov8n.pt")
+            if stationery_path is not None and stationery_path == config.STATIONERY_MODEL_PATH:
+                stationery_path = config.ROOT / "models" / "stationery.pt"
+            if stationery_path is not None and stationery_path.suffix != ".pt":
+                raise ValueError("CUDA necesita pesos .pt para --stationery-model.")
+            for path in (model_path, stationery_path):
+                if path is not None and not path.is_file():
+                    raise FileNotFoundError(f"Faltan pesos CUDA: {path}")
+            self._predict_options = {"device": 0, "half": half}
+        if sys.platform == "win32" and self.device == "cpu":
             torch.set_num_threads(1)
-        self.model = YOLO(str(config.MODEL_PATH), task="detect")
+        print(f"Inferencia YOLO: {self.device.upper()} | {model_path.name} | "
+              f"{'FP16' if half and self.device == 'cuda' else 'FP32'}", flush=True)
+        self.model = YOLO(str(model_path), task="detect")
         # Calienta antes de consultar names: evita que Ultralytics compile un predictor temporal.
         dummy = np.zeros((config.FRAME_H, config.FRAME_W, 3), np.uint8)
         self.model.predict(dummy, imgsz=config.IMGSZ, verbose=False, **self._predict_options)
