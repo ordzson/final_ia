@@ -4,6 +4,7 @@ import math
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 
 import cv2
 from PySide6.QtCore import QObject, QRectF, Qt, QThread, QTimer, Signal, Slot
@@ -24,7 +25,6 @@ MAX_READ_FAILS = 15
 FPS_ALPHA = 0.1
 FLASH_S = 0.25
 AUTOSHOT_WARMUP_S = 2.0
-UNI_KEYS = set(config.UNI_ITEMS)
 UNI_ONLY_TIP = "Solo en modo General"
 SCORE_EASE = 0.15                  # animación de la barra: disp += (score - disp) * SCORE_EASE
 FLOAT_S = 1.0                      # duración de los "+X pts" flotantes
@@ -190,11 +190,12 @@ class MainWindow(QMainWindow):
     inference_requested = Signal(object)
 
     def __init__(self, detector: Detector, cameras: list[tuple[int, int, int]],
-                 camera_idx: int | None, mode: str) -> None:
+                 camera_idx: int | None, mode: str, *, live_scoring: bool = False) -> None:
         super().__init__()
         self.detector = detector
         self.stats_tracker = PresenceTracker()
-        self.uni_scorer = UniScorer(detector.available_keys)
+        self.uni_scorer = UniScorer(detector.available_keys, live=live_scoring)
+        self.live_scoring = live_scoring
         self.cap: cv2.VideoCapture | None = None
         self.camera_idx: int | None = None      # cámara elegida; se reintenta si se pierde
         self.mode = mode
@@ -380,9 +381,12 @@ class MainWindow(QMainWindow):
         uni_lay.setContentsMargins(0, 0, 0, 0)
         uni_lay.setSpacing(8)
         title(uni_lay, "Puntaje")
-        self.score_value, self.round_value, self.best_value = value_grid(
-            uni_lay, ["Puntaje actual", "Tiempo de la ronda", "Mejor puntaje de la sesión"])
-        title(uni_lay, "Ítems guardados")
+        score_rows = ["Puntaje actual", "Mejor puntaje de la sesión"]
+        if not self.live_scoring:
+            score_rows.append("Tiempo de la ronda")
+        self.score_value, self.best_value, *round_values = value_grid(uni_lay, score_rows)
+        self.round_value = round_values[0] if round_values else None
+        title(uni_lay, "Ítems visibles" if self.live_scoring else "Ítems guardados")
         self.collected_label = QLabel(textFormat=Qt.TextFormat.RichText)
         uni_lay.addWidget(self.collected_label)
         lay.addWidget(self.uni_section)
@@ -535,7 +539,7 @@ class MainWindow(QMainWindow):
         uni = self.mode == "uni"
         groups = {"objetos"} if uni else {g for g, cb in self.group_checks.items() if cb.isChecked()}
         job = {"generation": self._generation, "frame": frame, "conf": self.conf,
-               "groups": frozenset(groups), "only_keys": frozenset(UNI_KEYS) if uni else None,
+               "groups": frozenset(groups), "only_keys": frozenset(self.uni_scorer.items) if uni else None,
                "mode": self.mode, "brightness": brightness}
         self._inflight = job
         self.inference_requested.emit(job)
@@ -613,7 +617,7 @@ class MainWindow(QMainWindow):
             best = max((d for d in dets if d.key == k), key=lambda d: d.conf, default=None)
             if best is not None:
                 x1, y1, x2, _ = best.box
-                self.floaters.append((now, (x1 + x2) / 2, y1, f"+{config.UNI_ITEMS[k][1]} pts"))
+                self.floaters.append((now, (x1 + x2) / 2, y1, f"+{self.uni_scorer.items[k][1]} pts"))
         self.floaters = [f for f in self.floaters if now - f[0] < FLOAT_S]
 
     def draw_general(self, p: QPainter, dets, img_w: int, img_h: int) -> None:
@@ -630,7 +634,7 @@ class MainWindow(QMainWindow):
         font = px_font(16 * s)
         taken: list[QRectF] = []
         for d in sorted(dets, key=lambda d: d.conf, reverse=True):
-            text = f"{d.label} +{config.UNI_ITEMS[d.key][1]} · {d.conf:.0%}"
+            text = f"{d.label} +{self.uni_scorer.items[d.key][1]} · {d.conf:.0%}"
             draw_box(p, d.box, QColor(config.COLORS["uni"]), text, font, s, img_w, DARK_TEXT, HUD_H * s, taken)
         self.draw_hud(p, img_w, s)
         if self.uni_state.badge:
@@ -655,18 +659,17 @@ class MainWindow(QMainWindow):
         p.setPen(QColor(t["muted"]))
         p.drawText(QRectF(28 * s, 70 * s, 260 * s, 26 * s), left, f"de {st.max_score} pts")
 
-        # Derecha: reloj de la ronda
-        right = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        if st.phase == "running" and st.time_left <= WARN_S:
-            clock_color = WARN_COLOR
-        else:
+        if not self.live_scoring:
+            right = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
             clock_color = t["muted"] if st.phase == "result" else t["text"]
-        p.setFont(px_font(44 * s))
-        p.setPen(QColor(clock_color))
-        p.drawText(QRectF(img_w - 288 * s, 10 * s, 260 * s, 60 * s), right, clock(st.time_left))
-        p.setFont(px_font(18 * s, bold=False))
-        p.setPen(QColor(t["muted"]))
-        p.drawText(QRectF(img_w - 288 * s, 70 * s, 260 * s, 26 * s), right, ROUND_CAPTIONS[st.phase])
+            if st.phase == "running" and st.time_left <= WARN_S:
+                clock_color = WARN_COLOR
+            p.setFont(px_font(44 * s))
+            p.setPen(QColor(clock_color))
+            p.drawText(QRectF(img_w - 288 * s, 10 * s, 260 * s, 60 * s), right, clock(st.time_left))
+            p.setFont(px_font(18 * s, bold=False))
+            p.setPen(QColor(t["muted"]))
+            p.drawText(QRectF(img_w - 288 * s, 70 * s, 260 * s, 26 * s), right, ROUND_CAPTIONS[st.phase])
 
         # Centro: barra de progreso animada
         bar_w, bar_h = img_w * 0.5, 18 * s
@@ -876,10 +879,11 @@ class MainWindow(QMainWindow):
             self.uni_state = self.uni_scorer.advance(now)
             st = self.uni_state
             self.score_value.setText(f"{st.score} / {st.max_score}")
-            self.round_value.setText(clock(st.time_left) if st.phase == "running" else ROUND_STATUS[st.phase])
+            if self.round_value is not None:
+                self.round_value.setText(clock(st.time_left) if st.phase == "running" else ROUND_STATUS[st.phase])
             self.best_value.setText(str(self.best_score))
             self.collected_label.setText(rows_html(
-                [(config.COLORS["uni"], config.LABELS_ES[k], config.UNI_ITEMS[k][0]) for k in st.collected]))
+                [(config.COLORS["uni"], config.LABELS_ES[k], self.uni_scorer.items[k][0]) for k in st.collected]))
 
         on_screen = sorted(self.last_dets, key=lambda d: d.conf, reverse=True)[:8]
         self.on_screen_label.setText(rows_html(
@@ -992,13 +996,18 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="VisionAI — detector de objetos en tiempo real")
     ap.add_argument("--camera", type=int, metavar="N", help="índice inicial de la cámara")
     ap.add_argument("--mode", choices=list(MODE_NAMES), default="general", help="modo inicial")
+    ap.add_argument("--uni-round", action="store_true", help="usa la ronda acumulativa de 60 s en Universitario")
     ap.add_argument("--quality", choices=list(config.MODEL_PROFILES), default=config.DEFAULT_QUALITY,
                     help="accurate: YOLO26s 640, prioriza reconocimiento; detail: YOLOv8n 480; fast: YOLOv8n 320")
+    ap.add_argument("--stationery-model", type=Path, metavar="DIR",
+                    help="usa otro detector OpenVINO de útiles")
     ap.add_argument("--resolution", choices=("640x480", "1280x720"),
                     help="resolución solicitada a la cámara; 720p limita esta cámara a unos 10 FPS")
     ap.add_argument("--autoshot", type=float, metavar="SEG",
                     help="a los SEG segundos guarda capturas/autoshot.png, imprime los FPS y sale")
     args = ap.parse_args()
+    if args.stationery_model is not None and not args.stationery_model.is_dir():
+        ap.error("--stationery-model debe apuntar al directorio del modelo OpenVINO")
 
     config.MODEL_PATH, config.IMGSZ = config.MODEL_PROFILES[args.quality]
     if args.resolution:
@@ -1006,9 +1015,12 @@ def main() -> None:
 
     app = QApplication(sys.argv[:1])
     apply_theme(app)
-    detector = Detector()
+    stationery_model = args.stationery_model
+    if stationery_model is None and config.STATIONERY_MODEL_PATH.is_dir():
+        stationery_model = config.STATIONERY_MODEL_PATH
+    detector = Detector(stationery_model)
     cameras = probe_cameras() if args.camera is None else []
-    win = MainWindow(detector, cameras, args.camera, args.mode)
+    win = MainWindow(detector, cameras, args.camera, args.mode, live_scoring=not args.uni_round)
     win.show()
     if args.autoshot is not None:
         win.schedule_autoshot(args.autoshot)

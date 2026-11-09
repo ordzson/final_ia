@@ -3,6 +3,7 @@ import time
 import sys
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 
 import cv2
 import mediapipe as mp
@@ -38,9 +39,17 @@ def _clip_box(x1: float, y1: float, x2: float, y2: float,
     return x1, y1, x2, y2
 
 
+def _overlaps_notebook(book: Det, notebook: Det) -> bool:
+    x1, y1, x2, y2 = book.box
+    nx1, ny1, nx2, ny2 = notebook.box
+    intersection = max(0, min(x2, nx2) - max(x1, nx1)) * max(0, min(y2, ny2) - max(y1, ny1))
+    union = (x2 - x1) * (y2 - y1) + (nx2 - nx1) * (ny2 - ny1) - intersection
+    return intersection >= 0.7 * union
+
+
 class Detector:
-    def __init__(self) -> None:
-        """Carga YOLO desde config.MODEL_PATH y el detector de rostros desde config.FACE_MODEL_PATH."""
+    def __init__(self, stationery_path: Path | None = None) -> None:
+        """Carga YOLO, BlazeFace y, si se indica, el detector de lápices y cuadernos."""
         # Un hilo para pre/postproceso evita competir con OpenVINO en esta CPU Windows.
         self._predict_options = {"device": "intel:CPU"} if sys.platform == "win32" else {}
         if sys.platform == "win32":
@@ -52,7 +61,16 @@ class Detector:
         self._torch_threads = torch.get_num_threads()
         self._torch_thread_id = threading.get_ident()
         self._key_ids = {name: i for i, name in self.model.names.items() if name in config.LABELS_ES}
-        self._id_keys = {i: name for name, i in self._key_ids.items()}
+        self.stationery = None
+        self._stationery_ids = {}
+        if stationery_path is not None:
+            self.stationery = YOLO(str(stationery_path), task="detect")
+            self.stationery.predict(dummy, imgsz=config.STATIONERY_IMGSZ, verbose=False,
+                                    **self._predict_options)
+            self._stationery_ids = {name: i for i, name in self.stationery.names.items()}
+            stationery_classes = self._stationery_ids.keys()
+            if not config.STATIONERY_KEYS <= stationery_classes <= config.STATIONERY_KEYS | {"pen"}:
+                raise ValueError("El modelo de útiles debe tener pencil y notebook. También puede tener pen.")
 
         options = vision.FaceDetectorOptions(
             base_options=mp_tasks.BaseOptions(model_asset_path=str(config.FACE_MODEL_PATH)),
@@ -65,7 +83,7 @@ class Detector:
     @property
     def available_keys(self) -> set[str]:
         """Claves de config.LABELS_ES que existen en model.names. No incluye FACE_KEY."""
-        return set(self._key_ids)
+        return self._key_ids.keys() | self._stationery_ids.keys()
 
     def detect(self, frame_bgr, conf: float, groups: set[str],
                only_keys: set[str] | None = None) -> list[Det]:
@@ -87,15 +105,29 @@ class Detector:
         # Con la lista vacía no se llama a YOLO: classes=[] o None lo haría detectar todo
         if keys:
             dets += self._detect_yolo(frame_bgr, conf, keys)
+        if self.stationery is not None and "objetos" in groups:
+            stationery_keys = self._stationery_ids.keys()
+            if only_keys is not None:
+                stationery_keys = stationery_keys & only_keys
+            if stationery_keys:
+                ids = {self._stationery_ids[k]: k for k in stationery_keys}
+                stationery = self._predict_objects(self.stationery, frame_bgr, conf, config.STATIONERY_IMGSZ, ids)
+                notebooks = [det for det in stationery if det.key == "notebook"]
+                dets = [det for det in dets if det.key != "book"
+                        or not any(_overlaps_notebook(det, notebook) for notebook in notebooks)]
+                dets += stationery
         if "rostros" in groups:
             dets += self._detect_faces(frame_bgr, conf)
         return dets
 
     def _detect_yolo(self, frame_bgr, conf: float, keys: list[str]) -> list[Det]:
+        ids = {self._key_ids[k]: k for k in keys}
+        return self._predict_objects(self.model, frame_bgr, conf, config.IMGSZ, ids)
+
+    def _predict_objects(self, model, frame_bgr, conf: float, imgsz: int, ids: dict[int, str]) -> list[Det]:
         h, w = frame_bgr.shape[:2]
-        ids = [self._key_ids[k] for k in keys]
-        r = self.model.predict(frame_bgr, imgsz=config.IMGSZ, conf=conf, classes=ids, verbose=False,
-                               **self._predict_options)[0]
+        r = model.predict(frame_bgr, imgsz=imgsz, conf=conf, classes=list(ids), verbose=False,
+                          **self._predict_options)[0]
         xyxy = r.boxes.xyxy.cpu().numpy()
         confs = r.boxes.conf.cpu().numpy()
         cls = r.boxes.cls.cpu().numpy().astype(int)
@@ -104,7 +136,7 @@ class Detector:
             box = _clip_box(x1, y1, x2, y2, w, h)
             if box is None:
                 continue
-            key = self._id_keys[int(i)]
+            key = ids[int(i)]
             dets.append(Det(key, config.LABELS_ES[key], float(c), box, _group_of(key)))
         return dets
 

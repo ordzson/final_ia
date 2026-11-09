@@ -1,0 +1,26 @@
+description: VisionAI YOLOv8n trained on School supplies v3 and detector_de_utiles v1
+author: Ultralytics
+date: "2026-11-09T00:21:44.302809-06:00"
+version: "8.4.207"
+license: AGPL-3.0 License (https://ultralytics.com/license)
+docs: https://docs.ultralytics.com
+stride: 32
+task: detect
+head: Detect
+batch: 1
+imgsz:
+- 640
+- 640
+names:
+  0: pencil
+  1: notebook
+  2: pen
+args:
+  data: null
+  batch: 1
+  fraction: 1.0
+  quantize: 32
+  nms: null
+  dynamic: false
+channels: 3
+end2end: false

@@ -108,7 +108,8 @@ def main():
             return result
         return wrapper
 
-    detector = Detector()
+    stationery = config.STATIONERY_MODEL_PATH
+    detector = Detector(stationery if stationery.is_dir() else None)
     detector.detect = measured("detect_ms", detector.detect)
     detector._detect_yolo = measured("yolo_ms", detector._detect_yolo)
     detector._detect_faces = measured("face_ms", detector._detect_faces)
@@ -129,7 +130,7 @@ def main():
         def show_image(self, image, now):
             measured("display_ms", super().show_image)(image, now)
 
-    window = Window(detector, [], args.camera, args.mode)
+    window = Window(detector, [], args.camera, args.mode, live_scoring=True)
     def frame_processed(_groups, _size):
         if started is not None and time.perf_counter() - started >= 2:
             processed.append(time.perf_counter())

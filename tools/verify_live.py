@@ -236,14 +236,15 @@ def main() -> int:
     config.CAPTURES_DIR = verify.evidence / "user_captures"  # Solo cambia el destino de evidencia.
     application = QApplication(sys.argv[:1])
     vision_app.apply_theme(application)
-    detector = Detector()
+    stationery = config.STATIONERY_MODEL_PATH
+    detector = Detector(stationery if stationery.is_dir() else None)
 
     def observed_frame(groups, size):
         if verify.active:
             verify.resolution_observed = f"{size[0]}x{size[1]}"
         verify.detected(groups)
 
-    win = vision_app.MainWindow(detector, [], args.camera, "general")
+    win = vision_app.MainWindow(detector, [], args.camera, "general", live_scoring=True)
     verify.win = win
     win.frame_processed.connect(observed_frame)
     verify.start = verify.last_account = time.monotonic()

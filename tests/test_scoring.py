@@ -296,6 +296,19 @@ def test_reconnect_requires_fresh_presence():
     assert abs(s.time_left - (ROUND - 10)) < 1e-9
 
 
+def test_live_score_follows_objects_entering_and_leaving():
+    scorer = UniScorer(set(config.UNI_LIVE_ITEMS) | {"pencil", "cell phone"}, live=True)
+    keys = {"backpack", "book", "laptop", "notebook", "pen", "pencil", "cell phone"}
+    assert scorer.update(keys, 0.0).score == 0
+    visible = scorer.update(keys, 0.35)
+    assert visible.score == visible.max_score == 75
+    assert visible.badge and set(visible.entered) == set(config.UNI_LIVE_ITEMS)
+    assert scorer.update({"book"}, 0.65).score == 75
+    visible = scorer.update({"book"}, 1.10)
+    assert visible.score == 20 and visible.present == ["book"] and not visible.badge
+    assert scorer.advance(2.0).score == 0
+
+
 if __name__ == "__main__":
     test_no_keys()
     test_enter_delay_and_single_entered()
@@ -314,4 +327,5 @@ if __name__ == "__main__":
     test_no_points_after_deadline()
     test_interleaved_clock_does_not_chain_rounds()
     test_reconnect_requires_fresh_presence()
+    test_live_score_follows_objects_entering_and_leaving()
     print("OK")

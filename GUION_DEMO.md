@@ -13,21 +13,21 @@ Reemplacen `[Integrante 1]`, `[Integrante 2]` y `[Integrante 3]` por sus nombres
 
 | Dato | Valor |
 |---|---|
-| Modelo de objetos actual | **YOLO26s**, pesos oficiales preentrenados en **COCO-80**, OpenVINO **FP32**, entrada **640 px**; perfil `accurate`, predeterminado en Windows |
-| Perfiles conservados | `detail`: YOLOv8n 480, predeterminado Linux; `fast`: YOLOv8n 320, alternativa rápida. No se atribuyen sus FPS a YOLO26s |
+| Modelo de objetos actual | **YOLOv8n COCO** a 480 en el perfil predeterminado `detail`, más **YOLOv8n de útiles** a 640, ambos OpenVINO FP32 |
+| Otros perfiles COCO | `fast`: YOLOv8n a 320; `accurate`: YOLO26s a 640 |
 | Modelo de rostros | **MediaPipe BlazeFace** (`blaze_face_short_range`) |
 | Interfaz | PySide6 (Qt 6), dibujo QPainter/RGB32; YOLO y rostros en un `QThread`, captura/controles/puntaje en GUI |
-| Plan del proyecto | **Plan A** (clases COCO). YOLO-World fue una prueba histórica descartada; el detector actual es YOLO26s |
+| Clases adicionales | Lápiz, cuaderno y lapicero, ajustadas con School supplies y detector_de_utiles |
 | **FPS Windows: línea base** | General **7.5** · Universitario **9.3** (2026-11-07, cámara 1, 1280×720). Son mediciones previas a la optimización; consulta el resultado actual en `PROGRESO.md` antes de la demo |
 | FPS Windows actual: `accurate` | Alrededor de **3–4 FPS**. Corrida Universitario de 20 s: **3.45 FPS**, 62 resultados en **17.9937 s** útiles, sin error. Una corrida de 25 s empezó en General, pero el usuario pasó a Uni: no es una medida exclusiva de General |
 | FPS Windows: historial `fast` | **17.90 FPS General / 19.01 Universitario** en corridas breves; sesión anterior de 600 s: **17.71 FPS** en Uni, con caída a unos 5 al grabar. Son cifras de YOLOv8n 320, no de `accurate` |
 | FPS Linux: referencia histórica | Con USB externa: General **18.9** · Universitario **21.5** (2026-10-25). Con integrada: General 15.4–15.6 · Universitario 15.9–16.7. Cargador, turbo activo y 1280×720; no representan esta laptop Windows |
 | Detección por frame: Linux histórico | General (objetos + personas + rostros): **38 ms** (~26 FPS) · Universitario: **32 ms** (~31 FPS) |
 | Límite de FPS: Linux histórico | La integrada entregaba 15–16 cuadros por segundo a 1280×720. Con USB (30 cuadros por segundo), la detección y el dibujo fijaban el techo. El cuello de botella Windows se mide por separado |
-| Puntos del modo Universitario | Mochila +10 · Libro / Cuaderno +20 · Laptop +25 · Celular +5 → **máximo 60** |
+| Puntos del modo Universitario | Mochila +10 · Cuaderno +15 · Libro +20 · Laptop +25 · Lapicero +5 → **máximo 75** |
 | Insignia "NIVEL UNIVERSITARIO" | Con **50 puntos o más** |
-| Ronda del modo Universitario | **1 minuto**. Arranca con el primer objeto; cada objeto queda **guardado** aunque se retire. Termina antes si se juntan los 4. El resultado dura **5 s** y luego vuelve a 0 |
-| Antiparpadeo | Un objeto se guarda tras **0.3 s** estable. El tracker mantiene su presencia hasta **0.7 s** después de dejar de verse; el puntaje guardado dura hasta el fin de la ronda |
+| Puntaje en vivo | El puntaje suma los tipos visibles y disminuye al retirarlos. `--uni-round` activa el juego acumulativo de 60 s |
+| Antiparpadeo | Un objeto suma tras **0.3 s** de presencia estable y deja de sumar tras **0.7 s** sin detección |
 
 **Regla de oro:** usa cargador, buena luz y comprueba los FPS en el equipo de la demo. El ajuste `/sys/.../no_turbo` y la caída a unos 10 FPS con batería se observaron en Linux; no son instrucciones ni mediciones Windows.
 
@@ -52,15 +52,16 @@ Arranquen con la app abierta en modo **General**, las estadísticas reiniciadas 
 |---|---|---|
 | **0:00–0:45** — Qué es | Una persona frente a la cámara. Se ven sus cajas de Persona y Rostro. | "Esto es VisionAI. Es una aplicación que mira por la cámara y reconoce en tiempo real lo que tiene delante: personas, caras y objetos. Cada cosa que reconoce la encierra en un recuadro, le pone su nombre y qué tan segura está, en porcentaje." |
 | **0:45–2:00** — Modo General | Mostrar el celular y un libro. Apagar y prender **Rostros** con su casilla. Señalar el panel de la derecha. | "Fíjense en el número: 94 % indica la confianza del modelo. Azul son personas, rosa son caras y verde son objetos. Puedo apagar lo que no quiero ver, por ejemplo las caras. A la derecha se ven los cuadros por segundo que está procesando ahora y cuántas veces apareció cada clase." |
-| **2:00–4:15** — Modo Universitario | Pulsar `M`: el reloj marca 1:00 y espera. Mostrar los objetos **uno a uno** (o de a dos), en este orden: mochila puesta → libro → laptop → celular. Cuando se enciende su chip, el objeto ya se puede bajar. | "Ahora un juego: ¿estás listo para la universidad? Tengo un minuto para mostrar todo lo que llevo. Arranco en cero: 'Aún no estás listo'. Con la mochila, +10: acceso al campus, y el reloj empieza a correr. Con un libro, +20; ya lo puedo bajar, los puntos quedan guardados. Con la laptop, +25... y al pasar los 50 puntos, ¡NIVEL UNIVERSITARIO! Con el celular junto los cuatro: ¡completo!, y me dice cuánto tardé." |
-| **4:15–5:00** — Cierre | Apenas salga **¡COMPLETO!** con la insignia (se ve 5 s), pulsar `Espacio` para capturar. | "Todo esto corre en la CPU de una laptop, usando una red neuronal llamada YOLO. Y si quieren, les sacamos una foto con su puntaje." |
+| **2:00–4:15** — Modo Universitario | Pulsar `M`. Mostrar laptop, libro y cuaderno separados en el cuadro. Mostrar también mochila y lapicero. Retirar un objeto y señalar el cambio de puntaje. | "Cada tipo de objeto que ven suma una vez. Una laptop vale 25 y un cuaderno vale 15. Con 50 puntos aparece Nivel Universitario. Al retirar un objeto, el puntaje baja." |
+| **4:15–5:00** — Cierre | Pulsar `Espacio` con la insignia visible para capturar. | "YOLO encuentra los objetos en cada imagen y muestra una caja con su confianza. Podemos guardar la imagen con su puntaje." |
 
-**Si la mochila no se enciende en 3 s:** no insistan; sigan con el libro. **Libro + laptop + celular suman 50**, justo lo que pide la insignia. La mochila se puede sumar al final, antes de que se acabe el minuto, para llegar a 60.
+**Libro, laptop y cuaderno suman 60 puntos** cuando los tres permanecen visibles y se detectan.
 
 **Cómo mostrar cada objeto para que se detecte:**
 - **Mochila:** ensayar puesta en la espalda, de espaldas o de 3/4 y entera en cuadro. Esa postura ayudó en las pruebas anteriores; comprobarla con `accurate` y la mochila de la demo.
 - **Laptop:** ensayar con pantalla y teclado hacia la cámara, y comprobar también la tapa cerrada y su presencia junto al cuaderno. Usar una segunda laptop; no asumir que todas las vistas se reconocen.
-- **Libro o cuaderno:** ensayar el objeto real antes de la demo. Con el cuaderno de tapa dura probado, `accurate` reconoció las 4 fotos de tapa cerrada y 7 de 8 con tapa levantada; omitió las 10 con páginas visibles. La etiqueta **Libro / Cuaderno** corresponde a la clase `book` (pregunta 5).
+- **Libro y cuaderno:** ensayar ambos juntos, con el cuaderno abierto y cerrado. Son clases distintas y suman puntos por separado.
+- **Lapicero:** ensayar cerca de la cámara y mostrarlo separado de un lápiz para comprobar las dos etiquetas en General.
 - **Celular:** en la mano, con la pantalla o el dorso hacia la cámara.
 
 ---
@@ -73,7 +74,7 @@ Ensáyenla en **13 minutos** para tener margen. Cada bloque apunta a un criterio
 |---|---|---|---|---|
 | **0:00–1:30** | [Integrante 1] | Presentación | El problema y la solución en una frase. Arquitectura: captura y espejo en GUI → YOLO26s + BlazeFace en worker → resultado vigente → antiparpadeo, puntaje y QPainter en GUI. Se priorizó distinguir cuaderno/laptop y se declara el coste actual de 3–4 FPS. | Demo (10) |
 | **1:30–4:30** | [Integrante 2] | Modo General en vivo | Persona, rostro, celular, libro y laptop con caja, etiqueta en español y %. Apagar y prender **Objetos**, **Personas** y **Rostros**. Subir la confianza a 70 % (salen menos cajas) y bajarla a 20 % (salen más). Panel: FPS, tiempo, "En pantalla" y "Apariciones". **Capturar** con `Espacio` y abrir el PNG de `capturas/`. | Integración del modelo (30) · Interfaz (30) |
-| **4:30–8:00** | [Integrante 3] | Modo Universitario | Pulsar `M`: las casillas quedan deshabilitadas porque este modo solo busca objetos universitarios. El reloj marca 1:00 y arranca con el primer objeto. Mostrar los objetos uno a uno: "+X pts" flotante, barra animada, nivel, chips. Retirar un objeto: su caja y "En pantalla" se actualizan al instante, pero el puntaje se mantiene porque ya quedó guardado (explicar por qué, ver "Otras preguntas posibles"). Llegar a la insignia y a **¡COMPLETO!**; a los 5 s todo vuelve a 0. Señalar "Tiempo de la ronda" y "Mejor puntaje de la sesión" en el panel. | Modo universitario (30) |
+| **4:30–8:00** | [Integrante 3] | Modo Universitario | Pulsar `M`. Mostrar al menos cuatro tipos, señalar las cajas, los puntos flotantes, los chips y el nivel. Retirar uno y mostrar la reducción del puntaje. Volver a mostrarlo para recuperar la insignia. | Modo universitario (30) |
 | **8:00–9:30** | [Integrante 2] | Robustez | **Poca luz:** tapar casi toda la lente con la mano 2 s y comprobar franja amarilla y "Luz: Baja". **Objeto parcial:** probar una laptop parcialmente fuera del cuadro. **Quitar y poner rápido:** comprobar el filtro de presencia y que la ronda no duplica puntos. **USB, si se dispone de una:** desconectar y reconectar; comprobar aviso y recuperación. La integrada no se desenchufa. *(Pruebas físicas pendientes: ensayarlas antes y mostrar únicamente resultados comprobados.)* | Extra feria |
 | **9:30–12:30** | [Integrante 1] | Cómo funciona | Por qué YOLO26s (pregunta 1), flujo de detección (pregunta 2), OpenVINO y FPS reales (preguntas 3 y 8), rostros (pregunta 4), cuadernos y dataset (pregunta 5), antiparpadeo (pregunta 6). Si piden código: `detector.py`, `scoring.py`, `config.py` y evaluación con cajas en `tools/evaluate_detection.py`. | Justificación del modelo |
 | **12:30–15:00** | Todos | Preguntas | Limitaciones (pregunta 7) y las que haga el docente. | — |
@@ -90,7 +91,7 @@ Ensáyenla en **13 minutos** para tener margen. Cada bloque apunta a un criterio
 
 ### 1. ¿Por qué usamos ahora YOLO26s?
 
-El usuario priorizó distinguir cuadernos y laptops sobre los FPS. Se compararon modelos preentrenados con las mismas fotos propias y con imágenes públicas anotadas. **YOLO26s a 640** mejoró esa distinción y el F1 de la muestra pública frente a `fast` YOLOv8n 320. Se usa OpenVINO FP32, sin cuantización ni reentrenamiento.
+El perfil `detail` usa YOLOv8n COCO a 480 y un segundo YOLOv8n ajustado a 640 para lápiz, cuaderno y lapicero. Ambos usan OpenVINO FP32. En el Ryzen 5 3600, la app procesó 17.48 FPS en General y 18.72 FPS en Universitario con imágenes reproducidas. El equipo debe medir la cámara que usará en la demo.
 
 En **45 imágenes reservadas de COCO val2017**, con confianza 0.35 y matching de la misma clase a IoU ≥0.5:
 
@@ -140,7 +141,7 @@ Actualmente se exportó YOLO26s a **640 FP32**. En las 35 capturas propias, esa 
 
 ### 5. ¿Ya distingue todos los cuadernos de las laptops? ¿Con qué datos se probó?
 
-No. Los modelos se preentrenaron en **80 clases COCO**, incluida `book`, pero sin una clase propia `notebook`. La interfaz muestra **Libro / Cuaderno** para `book`; ese texto no añade entrenamiento. Se mantiene el Plan A: mochila, libro/cuaderno, laptop y celular, con un máximo de 60 puntos. El celular reemplaza al lapicero (+5).
+El perfil COCO detecta libros y laptops. El detector complementario se entrenó para lápices, cuadernos y lapiceros. Consulta [las pruebas del detector complementario](DATASET_RECONOCIMIENTO.md) y ensaya cuadernos y laptops reales juntos antes de la demo.
 
 En las **mismas 35 capturas propias**, al umbral 0.35:
 
@@ -155,13 +156,13 @@ Son fotos del **mismo cuaderno y del mismo celular**, varias parecidas. El 4/4 d
 
 Además se usaron **90 imágenes COCO val2017 con cajas**: 45 para validación y 45 reservadas para prueba, disjuntas. Cada grupo cubre las 13 clases de la app y seis imágenes negativas. No se usaron para entrenar. Las 35 capturas propias tienen etiquetas por imagen, sin cajas: aún no son un dataset de entrenamiento YOLO.
 
-**No hubo reentrenamiento.** Para un ajuste futuro hacen falta varios cuadernos y laptops, abiertos/cerrados y juntos; cajas completas de todas las clases que se quieran conservar y separación por objeto/sesión entre entrenamiento, validación y prueba. La guía práctica está en [DATASET_RECONOCIMIENTO.md](DATASET_RECONOCIMIENTO.md).
+Las 35 capturas y las imágenes COCO documentan la comparación anterior al entrenamiento de útiles.
 
 ### 6. ¿Qué hace el antiparpadeo?
 
 - El detector a veces ve durante uno o dos frames un objeto que no está (falso positivo), o pierde uno que sí está. Como el modo Universitario guarda cada objeto, un falso positivo regalaría puntos.
 - **Para entrar:** un objeto tiene que verse de forma estable **0.3 s** antes de contar. El número de frames depende de los FPS; no se trasladan los cinco frames aproximados del perfil rápido a la ejecución actual de 3–4 FPS.
-- **Para salir:** el tracker sigue considerando presente la clase hasta **0.7 s** después de dejar de verse. Ese margen evita que un hueco breve cuente como una aparición nueva. La lista de detecciones actuales y sus cajas pueden desaparecer antes; el puntaje de la ronda permanece porque el objeto ya se guardó.
+- **Para salir:** el tracker conserva la presencia hasta **0.7 s** después de la última detección. El puntaje en vivo baja cuando vence ese margen.
 - Cada clase suma **una sola vez**: dos libros siguen siendo +20.
 - Las pruebas de `tests/test_scoring.py` comprueban los márgenes de entrada/salida, acumulación, plazos y reloj sin frames nuevos. Las pruebas Qt verifican controles y ejecución del worker con datos sintéticos. Los resultados de esas pruebas no sustituyen la detección de objetos reales.
 - Es lógica pura en `scoring.py`, separada de la interfaz y del modelo.
@@ -192,7 +193,7 @@ Además se usaron **90 imágenes COCO val2017 con cajas**: 45 para validación y
 - **¿Por qué dibujan con QPainter y no con OpenCV?** `cv2.putText` no soporta tildes ni la ñ ("Aún", "Cámara"). QPainter sí, además de antialiasing y transparencias para el HUD.
 - **¿Por qué usar ahora 640?** Se eligió YOLO26s 640 por los resultados propios y públicos de reconocimiento. El efecto mezcla cambio de modelo y tamaño de entrada; no se atribuye la mejora solo a la resolución. `detail` 480 y `fast` 320 conservan YOLOv8n como alternativas.
 - **¿Entrenaron el modelo?** No. Usamos los pesos oficiales preentrenados en COCO. El trabajo del equipo fue elegir y optimizar el modelo, integrar los dos detectores, el antiparpadeo, el puntaje y la interfaz.
-- **¿Por qué el puntaje no baja al retirar un objeto?** Por diseño: es una ronda de 1 minuto y el progreso se guarda, para no obligar a sostener todos los objetos a la vez frente a la cámara. Lo que sí cambia en tiempo real al retirarlo es su caja, la lista "En pantalla" del panel y el reloj. Al terminar la ronda el puntaje vuelve a 0.
+- **¿Por qué tarda un momento en bajar el puntaje?** El filtro conserva la presencia hasta 0.7 s para tolerar omisiones de algunos fotogramas.
 - **¿Qué pasa si se desconecta la cámara?** La app no se cierra: muestra un aviso, intenta reabrirla cada 2 s y el video vuelve solo.
 - **¿Por qué un hilo de inferencia?** YOLO y rostros trabajan en un `QThread`; cámara, widgets y puntaje permanecen en GUI. Solo hay una inferencia en curso. Cambiar controles invalida resultados anteriores, evitando aplicar cajas o puntos de otra configuración.
 
@@ -241,7 +242,7 @@ Además se usaron **90 imágenes COCO val2017 con cajas**: 45 para validación y
 - [ ] Sesión prolongada equivalente con el perfil actual `accurate`; las corridas breves no la sustituyen.
 - [x] Interruptores, slider, captura, reinicio y poca luz confirmados por el usuario; confianza, reinicios y luz registrados también por el observador.
 - [ ] Objeto parcial y quitar/poner objetos rápido; anotar el resultado efectivo.
-- [ ] Mostrar los cuatro objetos hasta el badge y **¡COMPLETO!**, retirar objetos sin perder puntos, comprobar fin por tiempo y reinicio de ronda.
+- [ ] Mostrar al menos cuatro tipos, alcanzar la insignia y comprobar que baja el puntaje al retirar un objeto.
 - [ ] Desconectar y reconectar una USB si está disponible; si solo hay integrada, registrar que esa prueba física no se hizo.
 - [ ] Grabar y revisar el video de respaldo; anotar archivo, duración y fecha en `PROGRESO.md`.
 - [ ] Criterio ≥15 FPS: sigue incumplido con `accurate`; registrar la prioridad de reconocimiento aceptada sin marcar ese criterio como logrado.
@@ -262,7 +263,7 @@ Este video lo graba el equipo; no lo graba el agente. Sirve para mostrar el proy
 |---|---|
 | 0:00–0:15 | La ventana de VisionAI abierta en modo General, con una persona en cuadro. |
 | 0:15–1:15 | Modo General: persona, rostro, celular, libro y laptop con sus cajas. Apagar y prender cada casilla. Mover el slider de confianza. Capturar con `Espacio`. |
-| 1:15–2:30 | Modo Universitario (`M`): con el reloj corriendo, los objetos entran uno a uno hasta la insignia NIVEL UNIVERSITARIO y luego hasta 60 (**¡COMPLETO!**). Esperar los 5 s del resultado para que se vea la vuelta a 0. |
+| 1:15–2:30 | Modo Universitario (`M`). Mostrar al menos cuatro tipos, señalar la insignia y retirar un objeto para grabar el cambio de puntaje. |
 | 2:30–3:00 | Plano del panel lateral: FPS, mejor puntaje y apariciones. |
 
 ### Windows: Xbox Game Bar

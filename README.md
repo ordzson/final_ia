@@ -2,7 +2,7 @@
 
 Aplicación de escritorio que abre la cámara, detecta objetos en vivo y dibuja sobre el video una caja, la etiqueta en español y el porcentaje de confianza de cada detección.
 
-- **Objetos:** YOLO26s a 640 en el perfil Windows `accurate`, preentrenado en COCO y ejecutado en CPU con OpenVINO FP32. YOLOv8n permanece en los perfiles anteriores.
+- **Objetos:** YOLOv8n COCO a 480 en el perfil `detail` y un YOLOv8n a 640 entrenado para lápiz, cuaderno y lapicero. Ambos se ejecutan en CPU con OpenVINO FP32. `accurate` permite usar YOLO26s a 640 para COCO.
 - **Rostros:** MediaPipe BlazeFace.
 - **Interfaz:** PySide6 (Qt 6).
 
@@ -140,7 +140,7 @@ Con los ajustes de CPU, el hilo de inferencia y el perfil opcional `fast` 320, u
 
 La sesión posterior de **diez minutos** terminó con **10,513 resultados** y ningún error registrado, pico RSS **649.36 MiB**. El promedio Uni fue **17.71 FPS**; General ocupó solo 27 s entre cambios de modo y promedió **14.89 FPS**. Hubo intervalos de Uni inferiores a 15 mientras se grababa. El usuario pidió entonces conservar esos ajustes; no se garantiza ≥15 sostenidos con grabación. Estos FPS pertenecen únicamente a `fast`. La prueba con objetos llegó a 50 puntos e insignia; el resultado 60/60 y la validación de cuadernos en nuevas escenas siguen abiertos.
 
-**Prioridad posterior del usuario: reconocimiento antes que FPS.** Windows usa ahora por defecto `accurate`, YOLO26s 640. En las cuatro fotos del mismo cuaderno cerrado acertó 4/4 frente a 0/4 del anterior; conserva los 13/13 celulares de esa muestra. En 45 imágenes públicas reservadas reconoció 16/23 laptops frente a 12/23. Sigue fallando con páginas abiertas y no mejora todas las clases. La cámara real midió alrededor de **3–4 FPS** con este modelo mayor; las cifras rápidas anteriores pertenecen a `fast`. Consulta [VALIDACION_MODELO.md](VALIDACION_MODELO.md) para conteos, falsos positivos y límites.
+**Comparación histórica sin el detector de útiles.** El perfil `accurate`, YOLO26s 640, reconoció 4/4 fotos del mismo cuaderno cerrado como libro frente a 0/4 con `fast`, y 16/23 laptops en 45 imágenes públicas reservadas frente a 12/23. La cámara de esa laptop midió alrededor de **3–4 FPS** con `accurate`. La evaluación y sus límites están en [VALIDACION_MODELO.md](VALIDACION_MODELO.md).
 
 La optimización conserva la inferencia FP32 y todas las funciones. Windows fija OpenVINO a CPU y un hilo PyTorch para evitar competencia entre motores. YOLO y BlazeFace se ejecutan en un `QThread`, con una sola inferencia en curso; captura, puntaje y widgets permanecen en la interfaz. Al cambiar controles se descartan resultados de configuraciones anteriores. El dibujo RGB32 conserva los canales de color de 8 bits. Un repintado de la misma imagen no cuenta como otro resultado procesado.
 
@@ -177,17 +177,17 @@ En Windows, para usar la cámara integrada:
 .\.venv\Scripts\python.exe tests\test_evaluate_detection.py
 ```
 
-Hay **29 pruebas del producto verificadas**: 17 de puntaje/reloj y 12 de interfaz Qt, más cuatro pruebas del capturador y contratos de matching del evaluador. Las de Qt usan cámara y detecciones sintéticas; no acreditan detección con objetos reales.
+Las pruebas del producto incluyen 18 casos de puntaje y 12 de interfaz Qt, además de las pruebas del capturador y del evaluador. Las de Qt usan cámara y detecciones simuladas.
 
 ### Perfiles de detección
 
 | Perfil | Entrada | Uso |
 |---|---|---|
-| `accurate` | 640×640, YOLO26s | Predeterminado Windows; prioriza distinguir cuaderno y laptop; más lento |
-| `detail` | 480×480, YOLOv8n | Modelo original; predeterminado Linux |
+| `accurate` | 640×640, YOLO26s | Mayor tamaño para las clases COCO |
+| `detail` | 480×480, YOLOv8n | Predeterminado con el detector de útiles instalado |
 | `fast` | 320×320, YOLOv8n | Alternativa para recuperar los FPS anteriores |
 
-Los tres perfiles conservan las 13 clases de la app, FP32 sin cuantización, BlazeFace, controles y reglas de puntaje. `accurate` cambia los pesos a YOLO26s; `detail` y `fast` conservan YOLOv8n. La calidad depende también de la clase, vista y distancia: mayor entrada no garantiza acertar cada imagen.
+Los tres perfiles ofrecen las 13 clases COCO de la app con OpenVINO FP32. El detector de útiles y BlazeFace se ejecutan junto al perfil elegido. `accurate` usa YOLO26s. `detail` y `fast` usan YOLOv8n.
 
 ```powershell
 .\.venv\Scripts\python.exe app.py --camera 1 --quality accurate --resolution 640x480
@@ -196,6 +196,18 @@ Los tres perfiles conservan las 13 clases de la app, FP32 sin cuantización, Bla
 ```
 
 `--resolution 640x480|1280x720` cambia la resolución solicitada a la cámara. `--quality accurate|detail|fast` selecciona el modelo y su entrada; son ajustes independientes. Comprueba siempre qué resolución entrega el driver.
+
+### Detectar lápices, cuadernos y lapiceros
+
+La app carga `models/stationery_openvino_model` al abrir. El modo General muestra «Lápiz», «Cuaderno» y «Lapicero» junto con las detecciones del perfil COCO elegido.
+
+```powershell
+.\.venv\Scripts\python.exe app.py
+```
+
+Usa `--camera N` para elegir el índice de tu cámara. Consulta [el entrenamiento y la evaluación](DATASET_RECONOCIMIENTO.md) para ver los resultados y las limitaciones con imágenes de cámara.
+
+Con ambos detectores activos, `detail` procesó **17.48 FPS en General** y **18.72 FPS en Universitario** al reproducir imágenes en un Ryzen 5 3600. Mide los FPS con la cámara del equipo de la demo.
 
 En Linux:
 
@@ -230,7 +242,7 @@ Selecciona el objeto real en la lista superior y guarda tres muestras de cuadern
 
 Para recoger cuadernos y laptops sin límite ni cierre automático, usa `--capture-only --quality accurate` en lugar de `--capture`. **B** elige cuaderno, **L** laptop y **C** celular; selecciona siempre el objeto real antes de guardar. Cerrar termina sin comparar. Las etiquetas por imagen no son cajas de entrenamiento. Consulta [DATASET_RECONOCIMIENTO.md](DATASET_RECONOCIMIENTO.md) para preparar un dataset propio y [VALIDACION_MODELO.md](VALIDACION_MODELO.md) para la evaluación actual.
 
-Añade `--native` para comprobar también `models/yolov8n.pt` a entrada cuadrada 480 FP32. La prueba con 35 fotos reales reprodujo cuaderno→laptop también en ese original; los resultados y sus límites están en `VALIDACION_MODELO.md`. La etiqueta «Libro / Cuaderno» no crea una clase entrenada de cuaderno.
+Añade `--native` para comprobar también `models/yolov8n.pt` a entrada cuadrada 480 FP32. La prueba anterior con 35 fotos reprodujo cuaderno→laptop en ese modelo. Consulta [la comparación de perfiles COCO](VALIDACION_MODELO.md) y [la evaluación de las nuevas clases](DATASET_RECONOCIMIENTO.md).
 
 ## 6. Cómo se usa
 
@@ -271,20 +283,19 @@ El panel lateral muestra:
 
 ### Modo "Listo para la Universidad"
 
-Es una ronda de **1 minuto**. Los objetos se pueden mostrar uno a uno o de a varios: cada uno suma una sola vez y **queda guardado** aunque se retire (dos libros siguen valiendo +20):
+El puntaje suma los tipos de objetos visibles y se actualiza cuando los muestras o retiras. Dos libros visibles valen +20 en total.
 
 | Objeto | Nivel | Puntos |
 |---|---|---|
 | Mochila | Acceso a campus | +10 |
-| Libro / Cuaderno | Estudiante dedicado | +20 |
+| Cuaderno | Alumno responsable | +15 |
+| Libro | Estudiante dedicado | +20 |
 | Laptop | Listo para el aula | +25 |
-| Celular | Siempre conectado | +5 |
+| Lapicero | Siempre preparado | +5 |
 
-- **Arriba:** el puntaje (máximo 60), una barra de progreso, el nivel alcanzado, un chip por objeto y el reloj de la ronda. Los chips encendidos son los objetos ya guardados; los apagados, los que faltan. En los últimos 10 s el reloj se pone rojo.
-- **Ronda:** el reloj arranca con el primer objeto que se detecta al entrar al modo. Termina al acabarse el minuto o, antes, al juntar los 4 objetos. El resultado (**¡TIEMPO!** o **¡COMPLETO!**, con el tiempo que tardó) se muestra 5 s; luego el puntaje vuelve a 0 y espera el siguiente objeto. Los objetos que siguen en cuadro desde la ronda anterior no arrancan otra solos: hay que mostrar uno nuevo, o retirarlo y volver a mostrarlo. Las duraciones están en `config.py` (`UNI_ROUND_S` y `UNI_RESULT_S`).
-- **Insignia:** con **50 puntos o más** aparece la insignia **NIVEL UNIVERSITARIO**.
-- **Antiparpadeo:** un objeto se guarda solo después de verse 0.3 s seguidos. Así un falso positivo de un frame no suma puntos.
-- **Cuadernos y lapiceros:** el modelo está entrenado con COCO, que no tiene esas clases. Por eso un cuaderno se detecta con la clase libro (la etiqueta dice **Libro / Cuaderno**), y el lapicero se reemplazó por el **celular**.
+- El HUD muestra hasta **75 puntos**, el nivel y un chip por tipo de objeto. A partir de 50 puntos aparece **NIVEL UNIVERSITARIO**.
+- Una detección suma después de 0.3 s de presencia estable. Al retirar el objeto, sus puntos vencen tras 0.7 s sin detección.
+- `--mode uni --uni-round` abre el juego acumulativo anterior, con reloj de 60 s y sus cuatro ítems.
 
 ### Poca luz
 

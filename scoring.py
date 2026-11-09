@@ -60,10 +60,10 @@ class UniScorer:
     guardado al verse de forma estable, aunque luego se retire. Termina al juntar todos o al acabarse
     el tiempo; el resultado se muestra config.UNI_RESULT_S segundos y se vuelve a 0 a esperar otra ronda."""
 
-    def __init__(self, available_keys: set[str]) -> None:
-        """Solo cuenta los ítems de config.UNI_ITEMS cuya clave esté en available_keys."""
-        # Conserva el orden de config.UNI_ITEMS
-        self.items = {k: v for k, v in config.UNI_ITEMS.items() if k in available_keys}
+    def __init__(self, available_keys: set[str], *, live: bool = False) -> None:
+        self.live = live
+        items = config.UNI_LIVE_ITEMS if live else config.UNI_ITEMS
+        self.items = {k: v for k, v in items.items() if k in available_keys}
         self.max_score = sum(points for _, points in self.items.values())
         self.tracker = PresenceTracker()
         self.reset()
@@ -71,6 +71,8 @@ class UniScorer:
     def update(self, keys: set[str], now: float) -> UniState:
         self._advance_time(now)
         present_set, entered_set = self.tracker.update(keys & self.items.keys(), now)
+        if self.live:
+            return self._snapshot(now, present_set, entered_set)
         # Solo un objeto que entra arranca la ronda: los que siguen a la vista desde la anterior no
         # la reinician solos (si no, con todo en cuadro las rondas se encadenarían sin fin)
         if self._phase == "waiting" and entered_set:
@@ -97,7 +99,8 @@ class UniScorer:
             self._phase, self._collected = "waiting", set()
 
     def _snapshot(self, now: float, present_set: set[str], new: set[str]) -> UniState:
-        collected = [k for k in self.items if k in self._collected]
+        active = present_set if self.live else self._collected
+        collected = [k for k in self.items if k in active]
         # Cada clave suma una sola vez, aunque haya varias detecciones de ella
         score = sum(self.items[k][1] for k in collected)
         if collected:

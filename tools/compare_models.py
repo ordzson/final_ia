@@ -62,10 +62,10 @@ def build_sample_window(detector, camera, directory, samples, threshold, auto_cl
 
         @Slot(object, object, object)
         def on_sample_inference_finished(self, job, detections, error):
-            previous_tick = self.last_tick
+            previous_image = self.last_image
             super().on_inference_finished(job, detections, error)
-            if self.last_tick is not None and self.last_tick != previous_tick:
-                # Retiene el último frame aceptado sin depender de un callback temporal.
+            if self.last_image is not None and self.last_image is not previous_image:
+                # Cada resultado aceptado crea una imagen, aunque el reloj repita el instante.
                 self.raw_frame = job["frame"]
 
         def choose(self, expected):

@@ -10,9 +10,12 @@ MODEL_PROFILES = {
     "detail": (ROOT / "models" / "yolov8n_openvino_model", 480),
     "fast": (ROOT / "models" / "yolov8n_320_openvino_model", 320),
 }
-# En Windows se prioriza distinguir cuaderno/laptop; Linux conserva su perfil verificado.
-DEFAULT_QUALITY = "accurate" if sys.platform == "win32" else "detail"
+STATIONERY_MODEL_PATH = ROOT / "models" / "stationery_openvino_model"
+# Con el detector de útiles, detail equilibra el coste de las dos inferencias.
+DEFAULT_QUALITY = "accurate" if sys.platform == "win32" and not STATIONERY_MODEL_PATH.is_dir() else "detail"
 MODEL_PATH, IMGSZ = MODEL_PROFILES[DEFAULT_QUALITY]
+STATIONERY_IMGSZ = 640
+STATIONERY_KEYS = frozenset({"pencil", "notebook"})
 FACE_MODEL_PATH = ROOT / "models" / "blaze_face_short_range.tflite"
 CONF_DEFAULT = 0.35
 FACE_MIN_CONF = 0.5
@@ -30,7 +33,7 @@ LABELS_ES = {
     "handbag": "Bolso",
     "cell phone": "Celular",
     "laptop": "Laptop",
-    "book": "Libro / Cuaderno",  # COCO no tiene cuaderno: el modelo lo detecta como book
+    "book": "Libro",
     "dining table": "Mesa / Escritorio",
     "chair": "Silla",
     "bottle": "Botella",
@@ -38,6 +41,8 @@ LABELS_ES = {
     "keyboard": "Teclado",
     "mouse": "Mouse",
     "scissors": "Tijeras",
+    "pencil": "Lápiz",
+    "notebook": "Cuaderno",
     # Solo existen en Plan B (las claves deben ser idénticas a los textos usados en set_classes):
     "spiral notebook": "Cuaderno",
     "pen": "Lapicero",
@@ -53,6 +58,13 @@ UNI_ITEMS = {
     "book": ("Estudiante dedicado", 20),
     "laptop": ("Listo para el aula", 25),
     "cell phone": ("Siempre conectado", 5),
+}
+UNI_LIVE_ITEMS = {
+    "backpack": ("Acceso a campus", 10),
+    "notebook": ("Alumno responsable", 15),
+    "book": ("Estudiante dedicado", 20),
+    "laptop": ("Listo para el aula", 25),
+    "pen": ("Siempre preparado", 5),
 }
 UNI_THRESHOLD = 50
 NO_ITEMS_TEXT = "Aún no estás listo..."
