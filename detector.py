@@ -1,10 +1,13 @@
 """Detección de objetos (YOLO en OpenVINO) y de rostros (MediaPipe) sobre frames BGR."""
 import time
+import sys
+import threading
 from dataclasses import dataclass
 
 import cv2
 import mediapipe as mp
 import numpy as np
+import torch
 from mediapipe.tasks import python as mp_tasks
 from mediapipe.tasks.python import vision
 from ultralytics import YOLO
@@ -38,7 +41,16 @@ def _clip_box(x1: float, y1: float, x2: float, y2: float,
 class Detector:
     def __init__(self) -> None:
         """Carga YOLO desde config.MODEL_PATH y el detector de rostros desde config.FACE_MODEL_PATH."""
+        # Un hilo para pre/postproceso evita competir con OpenVINO en esta CPU Windows.
+        self._predict_options = {"device": "intel:CPU"} if sys.platform == "win32" else {}
+        if sys.platform == "win32":
+            torch.set_num_threads(1)
         self.model = YOLO(str(config.MODEL_PATH), task="detect")
+        # Calienta antes de consultar names: evita que Ultralytics compile un predictor temporal.
+        dummy = np.zeros((config.FRAME_H, config.FRAME_W, 3), np.uint8)
+        self.model.predict(dummy, imgsz=config.IMGSZ, verbose=False, **self._predict_options)
+        self._torch_threads = torch.get_num_threads()
+        self._torch_thread_id = threading.get_ident()
         self._key_ids = {name: i for i, name in self.model.names.items() if name in config.LABELS_ES}
         self._id_keys = {i: name for name, i in self._key_ids.items()}
 
@@ -49,10 +61,6 @@ class Detector:
         )
         self.face = vision.FaceDetector.create_from_options(options)
         self._last_ts = -1
-
-        # La primera inferencia compila el modelo en OpenVINO: se paga aquí y no en el primer frame
-        dummy = np.zeros((config.FRAME_H, config.FRAME_W, 3), np.uint8)
-        self.model.predict(dummy, imgsz=config.IMGSZ, verbose=False)
 
     @property
     def available_keys(self) -> set[str]:
@@ -68,6 +76,11 @@ class Detector:
         """
         if frame_bgr is None or frame_bgr.size == 0:
             return []
+        # OpenMP puede iniciar otro contexto al trasladar la inferencia a QThread.
+        thread_id = threading.get_ident()
+        if thread_id != self._torch_thread_id:
+            torch.set_num_threads(self._torch_threads)
+            self._torch_thread_id = thread_id
         keys = [k for k in self._key_ids
                 if _group_of(k) in groups and (only_keys is None or k in only_keys)]
         dets = []
@@ -81,7 +94,8 @@ class Detector:
     def _detect_yolo(self, frame_bgr, conf: float, keys: list[str]) -> list[Det]:
         h, w = frame_bgr.shape[:2]
         ids = [self._key_ids[k] for k in keys]
-        r = self.model.predict(frame_bgr, imgsz=config.IMGSZ, conf=conf, classes=ids, verbose=False)[0]
+        r = self.model.predict(frame_bgr, imgsz=config.IMGSZ, conf=conf, classes=ids, verbose=False,
+                               **self._predict_options)[0]
         xyxy = r.boxes.xyxy.cpu().numpy()
         confs = r.boxes.conf.cpu().numpy()
         cls = r.boxes.cls.cpu().numpy().astype(int)

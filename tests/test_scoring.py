@@ -207,6 +207,95 @@ def test_no_chained_rounds():
     assert s.phase == "result" and s.score == s.max_score
 
 
+def test_clock_without_new_observations():
+    """Consultar el reloj no estabiliza detecciones ni reinicia la racha entre frames reales."""
+    scorer = UniScorer(ALL_UNI)
+    scorer.update({"laptop"}, 0.0)
+    for now in (0.1, 0.2, 0.35):
+        s = scorer.advance(now)
+        assert s.phase == "waiting" and s.score == 0 and s.entered == []
+    # El segundo frame sí completa la racha original: las consultas no la borraron.
+    s = scorer.update({"laptop"}, 0.35)
+    assert s.phase == "running" and s.score == 25 and s.entered == ["laptop"]
+    for now in (0.4, 0.5, 0.6):
+        s = scorer.advance(now)
+        assert s.score == 25 and s.entered == []
+    s = scorer.update({"laptop"}, 0.65)
+    assert s.score == 25 and s.entered == []
+
+
+def test_clock_expires_round_without_frames():
+    """Sin cámara, la ronda vence a su hora y el resultado conserva solo sus cinco segundos."""
+    scorer = UniScorer(ALL_UNI)
+    scorer.update({"laptop"}, 0.0)
+    scorer.update({"laptop"}, 0.35)
+    deadline = 0.35 + ROUND
+    s = scorer.advance(deadline - 1)
+    assert s.phase == "running" and s.time_left == 1 and s.score == 25
+    assert s.present == [] and s.entered == []
+    s = scorer.advance(deadline + 2)
+    assert s.phase == "result" and s.time_left == 0 and s.score == 25
+    assert abs(s.result_left - (RESULT - 2)) < 1e-9 and s.entered == []
+    s = scorer.advance(deadline + RESULT + 0.1)
+    assert s.phase == "waiting" and s.score == 0 and s.collected == []
+    assert s.time_left == ROUND and s.result_left == 0
+
+
+def test_long_gap_does_not_extend_result():
+    """Un bloqueo largo salta a espera si ya vencieron tanto la ronda como el resultado."""
+    for use_clock in (True, False):
+        scorer = UniScorer(ALL_UNI)
+        scorer.update({"laptop"}, 0.0)
+        scorer.update({"laptop"}, 0.35)
+        now = 0.35 + ROUND + RESULT + 10
+        # Cubre el temporizador y el primer frame al reconectar sin consultas intermedias.
+        s = scorer.advance(now) if use_clock else scorer.update(set(), now)
+        assert s.phase == "waiting" and s.score == 0 and s.collected == []
+        assert s.time_left == ROUND and s.result_left == 0 and s.entered == []
+
+
+def test_no_points_after_deadline():
+    """Un objeto que se vuelve estable después del límite no se guarda en la ronda vencida."""
+    scorer = UniScorer(ALL_UNI)
+    scorer.update({"laptop"}, 0.0)
+    scorer.update({"laptop"}, 0.35)
+    deadline = 0.35 + ROUND
+    scorer.update({"book"}, deadline - 0.2)
+    scorer.advance(deadline + 0.1)
+    s = scorer.update({"book"}, deadline + 0.2)
+    assert s.phase == "result" and s.present == ["book"]
+    assert s.collected == ["laptop"] and s.score == 25 and s.entered == []
+
+
+def test_interleaved_clock_does_not_chain_rounds():
+    """El reloj del panel entre frames no provoca dobles ingresos ni encadena rondas completas."""
+    scorer = UniScorer(ALL_UNI)
+    entered = []
+    for i in range(round((RESULT + 2) / STEP)):
+        now = t(i)
+        s = scorer.update(ALL_UNI, now)
+        entered += s.entered
+        s = scorer.advance(now + STEP / 2)
+        assert s.entered == []
+    assert sorted(entered) == sorted(ALL_UNI)
+    assert s.phase == "waiting" and s.score == 0
+
+
+def test_reconnect_requires_fresh_presence():
+    """Tras un hueco sin frames, conservar los puntos no concede estabilidad a un objeto nuevo."""
+    scorer = UniScorer(ALL_UNI)
+    scorer.update({"laptop"}, 0.0)
+    scorer.update({"laptop"}, 0.35)
+    s = scorer.advance(10.0)
+    assert s.score == 25 and s.present == [] and s.entered == []
+    for now in (10.0, 10.25):
+        s = scorer.update({"book"}, now)
+        assert s.score == 25 and s.entered == []
+    s = scorer.update({"book"}, 10.35)
+    assert s.score == 45 and s.entered == ["book"]
+    assert abs(s.time_left - (ROUND - 10)) < 1e-9
+
+
 if __name__ == "__main__":
     test_no_keys()
     test_enter_delay_and_single_entered()
@@ -219,4 +308,10 @@ if __name__ == "__main__":
     test_round_timeout()
     test_complete_ends_early()
     test_no_chained_rounds()
+    test_clock_without_new_observations()
+    test_clock_expires_round_without_frames()
+    test_long_gap_does_not_extend_result()
+    test_no_points_after_deadline()
+    test_interleaved_clock_does_not_chain_rounds()
+    test_reconnect_requires_fresh_presence()
     print("OK")

@@ -1,18 +1,23 @@
 """Constantes del proyecto VisionAI. Única fuente de verdad para clases, puntos y umbrales."""
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
 # --- Modelos ---
-MODEL_PATH = ROOT / "models" / "yolov8n_openvino_model"
+MODEL_PROFILES = {
+    "detail": (ROOT / "models" / "yolov8n_openvino_model", 480),
+    "fast": (ROOT / "models" / "yolov8n_320_openvino_model", 320),
+}
+DEFAULT_QUALITY = "detail"
+MODEL_PATH, IMGSZ = MODEL_PROFILES[DEFAULT_QUALITY]
 FACE_MODEL_PATH = ROOT / "models" / "blaze_face_short_range.tflite"
-IMGSZ = 480               # debe coincidir con el imgsz usado al exportar a OpenVINO
 CONF_DEFAULT = 0.35
 FACE_MIN_CONF = 0.5
 
 # --- Cámara ---
-CAMERA_INDEX_DEFAULT = 2  # cámara USB externa; si no está conectada, la app abre la primera que encuentre
-FRAME_W, FRAME_H = 1280, 720
+CAMERA_INDEX_DEFAULT = 1 if sys.platform == "win32" else 2  # integrada verificada en esta laptop Windows; USB en Linux
+FRAME_W, FRAME_H = (640, 480) if sys.platform == "win32" else (1280, 720)
 MIRROR = True
 
 # --- Clases: clave = nombre EXACTO en model.names → etiqueta en español ---

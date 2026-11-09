@@ -12,8 +12,8 @@ Estados posibles: `pendiente` | `en curso` | `hecha` | `bloqueada`.
 | E2 | `scoring.py` y tests | hecha | 2026-10-20 | Tests OK, sin imports prohibidos. |
 | E3 | `app.py`: ventana y modo General | hecha | 2026-10-20 | Autoshot 15.3 FPS (techo de la cámara a 720p). Cambio de cámara sin probar (solo hay una): va al checklist E5. |
 | E4 | Modo Universitario | hecha | 2026-10-20 | **Con desviación aprobada:** el PNG con ≥ 55 y badge no se capturó (la mochila solo se detecta puesta). 15.8 FPS en Uni con cargador. **En batería, `detect()` tarda el doble (~10 FPS).** |
-| E5 | Pulido, robustez y README | en curso | 2026-10-21 | Código, README y FPS con cargador hechos (ver Mediciones finales); falta el checklist [USUARIO]. |
-| E6 | Guion de demo y defensa | en curso | 2026-10-21 | `GUION_DEMO.md` escrito con los FPS de E5 y Plan A. Faltan el video de respaldo [USUARIO] y cerrar E5. |
+| E5 | Pulido, robustez y README | en curso | 2026-11-08 | Optimización Windows, 29 pruebas automáticas y medición instrumentada. Faltan FPS finales de esta versión y checklist físico/sesión larga con objetos reales. Las cifras Linux son históricas. |
+| E6 | Guion de demo y defensa | en curso | 2026-11-08 | Guion actualizado para Windows/cámara 1 y perfiles de calidad. Faltan incorporar la medición final, el video de respaldo [USUARIO] y cerrar E5. |
 
 ## Decisiones de Etapa 0
 
@@ -281,3 +281,70 @@ Se empezó con E5 todavía `en curso` (falta su checklist [USUARIO]), como permi
 - **Falta probarlo en vivo con objetos [USUARIO].**
 
 **Riesgo frente al enunciado:** el criterio 5.1 dice "actualiza el puntaje en tiempo real al mostrar y retirar objetos". Ahora retirar no baja el puntaje. Al retirar, sí cambian al instante la caja, "En pantalla" y el reloj. El guion tiene la respuesta preparada.
+
+### Adaptación a Windows — 2026-11-07
+
+**Solicitud del usuario:** preparar y abrir esta copia en su entorno Windows con la cámara integrada de la laptop.
+
+**Hecho:**
+- Entorno local `.venv` con Python 3.12.7 de 64 bits; en Windows se usa `.venv\Scripts\python.exe` y `-m pip`.
+- PyTorch CPU 2.15.0+cpu, torchvision 0.29.2+cpu, ultralytics 8.4.207, OpenVINO 2026.4.1, MediaPipe 1.2.2, PySide6 6.12.0 y solo `opencv-contrib-python-headless` 5.0.0.93.
+- `requirements.windows.lock.txt` registra las 53 dependencias instaladas. El lock anterior de Linux se conserva.
+- `setup.ps1` y README incorporan instalación y ejecución Windows, sin cambiar la política de ejecución permanente de PowerShell.
+- `app.py` usa DirectShow en Windows, con respaldo MSMF si no abre; Linux conserva V4L2. El logging admite OpenCV 4/5 y Windows no aplica el recorte de cuatro filas de la cámara USB antigua.
+- La cámara física es **Hy-FHD(B550)-Camera**, estado Windows OK. Los permisos de cámara y aplicaciones de escritorio ya estaban habilitados; no se cambiaron.
+- El índice **0 no abre** con los backends probados. El índice **1** entrega imagen mediante DirectShow y queda como valor predeterminado Windows; Linux conserva el índice 2. La rueda OpenCV instalada no dispone del plugin MSMF.
+- `--camera N` abre directamente la cámara elegida; el selector conserva la búsqueda al desplegarse.
+
+**Verificación real:**
+- Las 11 pruebas de `tests/test_scoring.py` pasan con el nuevo entorno.
+- El modelo OpenVINO y MediaPipe cargan. En `tools/out/bus.jpg` se detectan tres personas con confianza mayor de 0.5.
+- Cámara 1: 12 frames válidos a **1280×720**. General muestra cajas de Persona y Rostro, con etiquetas y confianza correctas.
+- Autoshot de 8 s, excluyendo los 2 s iniciales: General **7.5 FPS**, 46 frames; Universitario **9.3 FPS**, 56 frames. Capturas de verificación en `.venv/verification/general/autoshot.png` y `.venv/verification/uni/autoshot.png`, fuera de los archivos versionados.
+- Tras las comprobaciones se abrió la aplicación en modo General con `app.py --camera 1`.
+
+**Pendiente:** el rendimiento de esta laptop Windows está por debajo de la meta de 15 FPS. Estas pruebas breves no cierran E5: siguen pendientes la sesión de diez minutos, el checklist físico y la validación completa de rondas con objetos. El video de respaldo de E6 sigue pendiente.
+
+### Revisión de pendientes y optimización Windows — 2026-11-08
+
+**Solicitud del usuario:** atender pendientes y mejorar los FPS sin perder las funciones del proyecto.
+
+**Entorno y diagnóstico comprobados:**
+- AMD Ryzen 7 3700U, 4 núcleos/8 hilos; cámara integrada Hy-FHD(B550)-Camera, DirectShow índice 1. Cargador conectado, batería al 100 % y plan de energía Equilibrado. No se cambió el plan global de energía.
+- Captura física a 1280×720: unos **10 FPS**, aunque `CAP_PROP_FPS=30` sea aceptado por el driver. Pedir 960×540 devuelve 640×480 a unos **30 FPS**. Windows usa ahora VGA 640×480; Linux conserva 1280×720.
+- La repetición del bucle anterior con modelo 480/captura 720p dio **6.34 FPS General**. Solo bajar la captura a VGA dejó **7.52 FPS General / 8.25 Universitario**: la inferencia de unos **100–125 ms** continuaba como coste principal.
+- Microbenchmark del mismo modelo FP32: fijar CPU y un hilo PyTorch redujo una medición de unos **130 a 82 ms**. Es una prueba de inferencia, no un FPS de la app completa.
+
+**Cambios implementados:**
+- Windows fija `device="intel:CPU"` y `torch.set_num_threads(1)`. El calentamiento ocurre antes de consultar `model.names`, evitando una carga/compilación redundante.
+- Se conservan `models/yolov8n.pt` y `models/yolov8n_openvino_model/` (480). Se exportaron los mismos pesos en FP32, sin cuantizar, a `models/yolov8n_320_openvino_model/`.
+- `--quality detail|fast` selecciona entrada 480 o 320. **`DEFAULT_QUALITY = "detail"` se conserva.** Los perfiles mantienen clases, rostros, controles y puntaje; la entrada 320 puede perder objetos pequeños o lejanos y necesita validación real antes de adoptarse como predeterminada.
+- `--resolution 640x480|1280x720` separa la resolución de cámara del tamaño de entrada del modelo.
+- YOLO y rostros se ejecutan en un `QThread`; DirectShow, widgets y scoring permanecen en el hilo de interfaz. Solo hay una inferencia en curso. Cambiar modo, grupos, confianza, cámara o reiniciar invalida su generación: los resultados antiguos no actualizan la interfaz ni suman FPS.
+- `QTimer` preciso de 1 ms; RGB32 con buffer propio, sin pérdida de canales de color de 8 bits. La siguiente inferencia puede avanzar mientras se dibuja el resultado aceptado.
+- `frame_processed` se emite únicamente por un resultado nuevo aceptado y dibujado. `--autoshot`, `tools/profile_app.py` y `tools/verify_live.py` usan ese evento, evitando contar repintados como inferencias adicionales.
+- El reloj de rondas avanza también sin frames nuevos: se respetan el minuto y los 5 s de resultado, no se suman observaciones tardías y una reconexión exige presencia nueva. Retirar un objeto sigue sin restar los puntos guardados.
+
+**Pruebas automatizadas comprobadas:** **29 pasan**: 17 de `tests/test_scoring.py` y 12 de `tests/test_app.py`. Cubren reloj sin frames, plazos y reconexión; grupos, confianza y modos; captura/reinicio; poca luz y cámara simulada; afinidad del worker, una sola inferencia, descarte de generaciones, errores y cierre ordenado. La interfaz usa datos sintéticos: estas pruebas no sustituyen objetos, luz o USB reales.
+
+**Documentación e instalación:** PLAN, CLAUDE, README y GUION distinguen Windows actual y Linux histórico. El criterio de retirar objetos coincide con la ronda acumulativa. `setup.sh` aplica el lock Linux como constraints del Plan A, respeta PyTorch CPU y el pin de headless, y no sobrescribe el lock. Sintaxis comprobada con Git Bash; no se ejecutó una instalación Linux nueva.
+
+**Archivo reversible del Plan B:** se trasladaron cuatro rutas descartadas, **6 archivos / 457,125,812 bytes**, a `.venv/archive/plan-b/`. `manifest.json` registra cada origen y destino. Git muestra eliminaciones de las rutas antiguas; los archivos permanecen en el disco en ese archivo local ignorado por Git. Los modelos activos Plan A y BlazeFace permanecen en `models/`.
+
+**Pendiente, sin dar E5/E6 por terminadas:**
+- [x] Medición breve de esta versión con `QThread`, perfil `fast` 320 FP32 y captura DirectShow real 640×480: **17.897 FPS General** (501 resultados en 27.993 s, tras 2 s iniciales) / **19.010 FPS Universitario** (342 en 17.991 s). General separó YOLO **46.06 ms** y rostros **7.05 ms**, detección total **53.13 ms**; Uni **48.83 ms**. Conversión RGB32 **0.77/0.95 ms**, dibujo/escalado **2.24/2.55 ms**. Las etapas se solapan; no sumar sus tiempos para inferir FPS. Evidencia: `.venv/verification/perf/fast_async_stages_general.json` y `fast_async_stages_uni.json`, con PNGs. Sin errores de inferencia.
+- [x] Sesión de **600 s** terminada con **10,513 resultados nuevos**, sin excepciones ni errores del worker y pico RSS **649.36 MiB**. Evidencia: `.venv/verification/live_fast.json` y `.jsonl`; la sesión comienza después de inicializar los modelos. Tras excluir 2 s: General **403/27.063 s = 14.89 FPS**, Uni **10,110/570.937 s = 17.71 FPS**. General solo tuvo segmentos breves entre cambios de modo; no acredita una prueba sostenida separada. Uni tuvo intervalos completos de 30 s entre **5.0 y 24.73 FPS**; hubo caída durante la grabación de pantalla y otras interacciones. El usuario considera los FPS aceptables y pidió **dejarlos así**: no se seguirán ajustando por este motivo. No afirmar ≥15 sostenidos en ambos modos.
+- [ ] Validación de calidad con objetos reales, especialmente pequeños o lejanos, antes de decidir si se cambia el perfil predeterminado.
+- [x] Objetos reales reconocidos entre dos rondas: libro, celular, mochila y laptop. La primera llegó a **35**; la segunda, a **50**, mostró la insignia y terminó por tiempo. Se conservaron puntos al retirar objetos. Evidencia PNG y eventos dentro de la carpeta indicada por `live_fast.json`.
+- [x] Poca luz activada y recuperada en varias ocasiones, confianza y reinicios registrados. El usuario confirmó funcionamiento de controles, captura, reinicio y aviso de luz. Esa confirmación manual es distinta de los eventos guardados por el observador.
+- [ ] «¡COMPLETO!» con 60/60 en una sola ronda y prueba explícita de objetos parciales/entradas rápidas; no se observaron en esta sesión.
+- [ ] Desconexión y reconexión física de USB, si está disponible; con solo integrada se registra la limitación.
+- [ ] Video completo de respaldo E6. Se comprobó una grabación corta: `Videos/Captures/VisionAI — Detector de Objetos en Tiempo Real 2026-11-08 17-55-22.mp4`, **25.989 s**, 1920×992, 672 frames, tres posiciones decodificadas correctamente. Metadatos y fotogramas de revisión: `.venv/verification/video_review/`. El usuario confirmó que grabar carga demasiado su máquina; no se da por completado el video de demo de 2–3 minutos.
+
+**Nuevo hallazgo reportado por el usuario:** algunos cuadernos **cerrados de tapa dura** se clasifican como celular. Se preparó `tools/compare_models.py`: recoge frames BGR sin overlays y compara las mismas muestras con 480, 320 y, opcionalmente con `--native`, el `.pt` original. Se conservaron los pesos y la configuración de rendimiento.
+
+**Captura múltiple de diagnóstico:** se corrigió la recepción de resultados de la ventana derivada con un slot Qt de nombre propio. Ahora conserva el último frame aceptado, muestra selector de objeto y contadores visibles y registra cada intento en `capture_events.jsonl`. Se añadió `tests/test_compare_models.py`: cinco pulsaciones guardan cinco PNG distintos y sin overlays, del frame nuevo correspondiente, con tres etiquetas `book` y dos `cell phone`. Prueba OK; se conservó la muestra real existente al reiniciar la herramienta. Los 29 tests del producto también se repitieron y pasan.
+
+**Comparación completada:** **35 PNG reales** conservados (22 del mismo cuaderno / 13 del mismo celular), con etiquetas revisadas visualmente. El `.pt` original 480 y OpenVINO 480 coincidieron en clases y cajas en las 35 imágenes; solo una confianza difirió en 0.00001 al redondear a cinco decimales. Ambos confundieron 18/22 fotos del cuaderno con laptop y omitieron 4; el 320 confundió 7 y omitió 15. Ninguno reconoció este cuaderno como libro. El celular se reconoció en 7/13 con 480 y 13/13 con 320. No son métricas de precisión general ni fotos independientes de distintos objetos. La confusión cuaderno→celular reportada no apareció en estas fotos; la confusión cuaderno→laptop también existe en el modelo sin exportar. Detalle, límites y reproducción en `VALIDACION_MODELO.md`; predicciones y etiquetas originales/revisadas en `.venv/verification/hardcover_samples/`. Sigue pendiente mejorar el modelo para estos cuadernos, sin atribuirlo solamente a la exportación ni alterar los FPS aceptados.
+
+**Estado al terminar:** VisionAI reabierta con `--camera 1 --quality fast --resolution 640x480`; ventana existente y respondiendo, sin errores en su log. Se conservó el perfil original 480 y `DEFAULT_QUALITY = "detail"`; esta sesión usa explícitamente el perfil rápido que el usuario pidió mantener. No se reentrenó ni se modificaron pesos o umbrales. Verificaciones: 29 tests del producto, prueba adicional de captura múltiple, 105 inferencias sobre las 35 fotos, sintaxis de Python/instaladores y `git diff --check` correctos.

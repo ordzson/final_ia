@@ -23,7 +23,7 @@ documenta el problema en `PROGRESO.md` y pregunta al usuario.
 
 ## 1. Contexto del proyecto
 
-Proyecto final de Visión por Computadora (Ingeniería en Sistemas, 9.º semestre). **La entrega es en pocos días** y consiste en una demo en vivo de 15 minutos ante el docente. El mejor proyecto va a la Feria Académica de julio.
+Proyecto final de Visión por Computadora (Ingeniería en Sistemas, 9.º semestre), preparado para una demo en vivo de 15 minutos ante el docente. El contexto original mencionaba una entrega próxima y la Feria Académica de julio; no hay una fecha de entrega vigente confirmada en este registro.
 
 ### Requisitos del enunciado (resumen fiel)
 
@@ -64,25 +64,41 @@ Extra por feria: hasta 25 puntos (impacto visual, originalidad, FPS, poca luz, o
 
 ---
 
-## 2. Entorno (verificado el 2026-10-20)
+## 2. Entorno actual y referencia histórica
+
+### Windows actual (verificado el 2026-11-07)
+
+- Esta copia es un repositorio Git y está en `C:\Users\Ozzca\OneDrive\Documentos\IA\final_ia`.
+- Python 3.12 de 64 bits en `.venv\Scripts\python.exe`; usa `-m pip` con ese intérprete. `setup.ps1` instala las versiones de `requirements.windows.lock.txt`.
+- Hardware Windows confirmado el 2026-11-08: **AMD Ryzen 7 3700U**, 4 núcleos/8 hilos, batería al 100 % y cargador conectado. El plan de energía estaba en **Equilibrado**; no se modificó.
+- Cámara integrada **Hy-FHD(B550)-Camera**, índice **1**, mediante **DirectShow**. El índice 0 no abre en este equipo; MSMF no está disponible en la rueda OpenCV instalada. Los índices pueden variar en otro equipo.
+- Los permisos de cámara y aplicaciones de escritorio estaban habilitados y no se cambiaron.
+- La línea base Windows fue General **7.5 FPS** y Universitario **9.3 FPS** a 1280×720. Consulta las mediciones posteriores de `PROGRESO.md`; los FPS Linux no acreditan el rendimiento Windows.
+- Diagnóstico Windows del 2026-11-08: la captura 1280×720 entrega unos **10 FPS** aunque el driver acepte pedir 30. Pedir 960×540 devuelve 640×480 a unos **30 FPS**. Bajar la captura a VGA con modelo 480 dejó General **7.52 FPS** y Uni **8.25 FPS**; la inferencia de unos **100–125 ms** sigue siendo el principal coste. No confundir FPS de cámara con FPS de detección completa.
+- Se conserva el modelo 480 como perfil `detail` y valor predeterminado. El nuevo perfil `fast` usa una exportación **320 FP32 de los mismos pesos** en otra carpeta; no reemplaza el modelo 480. Sus FPS finales y su detección con objetos reales quedan pendientes de validar antes de cambiar el valor predeterminado.
+- Windows captura 640×480 por defecto; Linux conserva 1280×720. `--resolution` permite elegir explícitamente una de esas dos resoluciones, independiente del tamaño de entrada del detector.
+- Comandos actuales: `.\.venv\Scripts\python.exe app.py --camera 1` y `.\.venv\Scripts\python.exe tests\test_scoring.py`.
+- Los ejemplos Bash y las rutas `.venv/bin/` del plan corresponden al procedimiento Linux. En PowerShell usa el intérprete Windows indicado arriba. Las herramientas `tools/cam_check.py`, `tools/bench.py` y `tools/live_check.py` todavía usan V4L2 y son exclusivas de Linux.
+
+### Linux histórico (verificado el 2026-10-20)
 
 - Linux (kernel 6.14), sesión **X11** (`DISPLAY=:0`).
 - Python 3.12.3, `git` y `curl` disponibles, 40 GB libres.
-- La carpeta del proyecto **no es un repositorio git**.
+- Estas condiciones corresponden al equipo Linux original, antes de trasladar la copia al repositorio actual.
 - CPU **Intel Core i5-1235U** (12 hilos), iGPU Iris Xe, 23 GB de RAM.
   - **No hay GPU NVIDIA, así que tampoco CUDA.** La inferencia corre en CPU con **OpenVINO**.
 - **Cámara integrada:** Chicony Integrated Camera.
   - `/dev/video0` es la de captura (índice OpenCV 0).
   - `/dev/video1` es solo metadatos y no da imagen.
   - La cámara externa USB que usaremos en la demo suele aparecer como índice 2.
-- **Falta `libxcb-cursor0`.** Qt 6.5+ (PySide6) no abre ventanas en X11 sin ese paquete. Su instalación es un paso [USUARIO] de la Etapa 0.
+- Qt 6.5+ (PySide6) requiere `libxcb-cursor0` en X11. Su instalación formó parte de la Etapa 0; no es una dependencia de Windows.
 - **Ruta del proyecto:** `/home/ordson/Documentos/Universidad/ia final`. Contiene un espacio, así que va **siempre entre comillas** en la shell.
-- **Python:** usa siempre `.venv/bin/python` y `.venv/bin/pip`. Nunca el `python3` del sistema.
+- **Python en Linux:** usa `.venv/bin/python` y `.venv/bin/python -m pip` después de crear el entorno.
 - No toques `.vscode/`.
 
 ### Restricciones del equipo (obligatorias)
 
-El usuario configuró restricciones de red y navegación en este equipo (ver `/home/ordson/AGENTS.md`).
+El equipo Linux original tenía restricciones de red y navegación (referencia histórica: `/home/ordson/AGENTS.md`). En el entorno actual aplica las instrucciones disponibles y conserva estas restricciones del proyecto:
 
 - **Nunca** modifiques, desactives ni evites DNS, `/etc/hosts`, proxies, VPN, políticas del navegador ni servicios del sistema.
 - **Hugging Face está bloqueado.** Si una descarga necesita `huggingface.co` y falla, **no busques rodeos**: usa la alternativa del plan (Plan A).
@@ -105,10 +121,11 @@ El usuario configuró restricciones de red y navegación en este equipo (ver `/h
 | Rostros | **MediaPipe Tasks Face Detector**, modelo `blaze_face_short_range.tflite` |
 | Interfaz | **PySide6** (Qt 6) |
 | Dibujo de overlays | **QPainter** sobre `QImage`. Nunca `cv2.putText`, que no soporta tildes ni ñ |
-| Captura de video | `cv2.VideoCapture(idx, cv2.CAP_V4L2)` |
+| Captura de video | Windows: DirectShow (`CAP_DSHOW`), índice 1 verificado; respaldo MSMF solo si está disponible. Linux: `CAP_V4L2`; USB histórica en índice 2 |
 | OpenCV instalado | **solo** `opencv-contrib-python-headless`. La versión con GUI trae plugins de Qt que chocan con PySide6 |
 | PyTorch | variante **CPU** (`--index-url https://download.pytorch.org/whl/cpu`) para no bajar ~3 GB de CUDA |
-| Bucle de video | `QTimer` en el hilo principal. Solo se pasa a `QThread` si la Etapa 5 lo exige por FPS |
+| Perfiles Plan A | `detail`: entrada 480, predeterminado mientras no se valide el alternativo. `fast`: entrada 320 FP32, mismos pesos y clases; puede perder objetos pequeños o lejanos |
+| Bucle de video | Captura y dibujo en el hilo principal; detección en un `QThread`, con una sola inferencia en curso y descarte de resultados anteriores a un cambio de controles |
 | Umbral "NIVEL UNIVERSITARIO" | puntaje **≥ 50** (aprobado por el usuario) |
 | Idioma | Textos de la interfaz y comentarios en español; identificadores (variables, funciones, clases) en inglés |
 | Espejo | El video se voltea horizontalmente (`cv2.flip(frame, 1)`) **antes** de detectar |
@@ -149,8 +166,10 @@ ia final/
 ├── README.md                 # E5: instalación y ejecución para humanos
 ├── GUION_DEMO.md             # E6: guion de demo y defensa
 ├── setup.sh                  # E0: crea el venv, instala dependencias y ajusta OpenCV
+├── setup.ps1                 # adaptación Windows; usa el lock de ese sistema
 ├── requirements.txt          # E0: dependencias de alto nivel
-├── requirements.lock.txt     # E0: salida de pip freeze
+├── requirements.lock.txt     # snapshot Linux, usado como constraints del Plan A
+├── requirements.windows.lock.txt # versiones comprobadas en Windows
 ├── config.py                 # E0: constantes (sección 6)
 ├── detector.py               # E1
 ├── scoring.py                # E2
@@ -167,6 +186,7 @@ ia final/
 ├── models/
 │   ├── yolov8n.pt
 │   ├── yolov8n_openvino_model/
+│   ├── yolov8n_320_openvino_model/      # perfil fast, exportación separada FP32
 │   ├── world_custom.pt                 # solo Plan B
 │   ├── world_custom_openvino_model/    # solo Plan B
 │   └── blaze_face_short_range.tflite
@@ -277,29 +297,32 @@ return present, entered
 
 ---
 
-## 6. Contenido de `config.py` (lo escribe la Etapa 0)
+## 6. Referencia de `config.py` (Etapa 0, con adaptaciones posteriores)
 
-Escribe este archivo tal cual, eligiendo **una** de las dos variantes de `MODEL_PATH` y `UNI_ITEMS` según el Plan elegido. Borra la otra variante; no dejes ambas comentadas.
+El Plan A quedó elegido en E0. El bloque siguiente conserva la referencia de configuración; no reemplaces con él los ajustes posteriores medidos de rendimiento. `config.py` y la evidencia en `PROGRESO.md` determinan los valores vigentes. Los perfiles `detail` y `fast` pertenecen al mismo Plan A; no actives además una variante Plan B sin autorización.
 
 ```python
 """Constantes del proyecto VisionAI. Única fuente de verdad para clases, puntos y umbrales."""
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
 # --- Modelos ---
-# Plan A:
-MODEL_PATH = ROOT / "models" / "yolov8n_openvino_model"
-# Plan B:
-# MODEL_PATH = ROOT / "models" / "world_custom_openvino_model"
+# Plan A: los dos perfiles conservan las clases y los puntos.
+MODEL_PROFILES = {
+    "detail": (ROOT / "models" / "yolov8n_openvino_model", 480),
+    "fast": (ROOT / "models" / "yolov8n_320_openvino_model", 320),
+}
+DEFAULT_QUALITY = "detail"  # no cambiar sin validar rendimiento y objetos reales
+MODEL_PATH, IMGSZ = MODEL_PROFILES[DEFAULT_QUALITY]
 FACE_MODEL_PATH = ROOT / "models" / "blaze_face_short_range.tflite"
-IMGSZ = 640               # debe coincidir con el imgsz usado al exportar a OpenVINO
 CONF_DEFAULT = 0.35
 FACE_MIN_CONF = 0.5
 
 # --- Cámara ---
-CAMERA_INDEX_DEFAULT = 0  # la Etapa 0 lo ajusta al índice que funcione
-FRAME_W, FRAME_H = 1280, 720
+CAMERA_INDEX_DEFAULT = 1 if sys.platform == "win32" else 2
+FRAME_W, FRAME_H = (640, 480) if sys.platform == "win32" else (1280, 720)
 MIRROR = True
 
 # --- Clases: clave = nombre EXACTO en model.names → etiqueta en español ---
@@ -310,7 +333,7 @@ LABELS_ES = {
     "handbag": "Bolso",
     "cell phone": "Celular",
     "laptop": "Laptop",
-    "book": "Libro",
+    "book": "Libro / Cuaderno",
     "dining table": "Mesa / Escritorio",
     "chair": "Silla",
     "bottle": "Botella",
@@ -403,22 +426,11 @@ E0 ──► E1 ─┐
    PySide6
    ```
 
-3. Crea `setup.sh` (ejecutable, con `set -euo pipefail` y que se pueda correr varias veces sin romper nada):
-   ```bash
-   #!/usr/bin/env bash
-   set -euo pipefail
-   cd "$(dirname "$0")"
-   [ -d .venv ] || python3 -m venv .venv
-   .venv/bin/pip install --upgrade pip
-   # PyTorch CPU: evita bajar ~3 GB de librerías CUDA (no hay GPU NVIDIA)
-   .venv/bin/pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-   .venv/bin/pip install -r requirements.txt
-   # ultralytics y mediapipe arrastran variantes de OpenCV con plugins Qt que chocan con PySide6
-   .venv/bin/pip uninstall -y opencv-python opencv-contrib-python opencv-python-headless opencv-contrib-python-headless || true
-   .venv/bin/pip install opencv-contrib-python-headless
-   .venv/bin/pip freeze > requirements.lock.txt
-   ```
-   Ejecútalo. `pip check` dirá que ultralytics pide `opencv-python`: **es esperado y se ignora**.
+3. **Instalación por sistema:** usa `setup.ps1` en Windows y `setup.sh` en Linux. Los instaladores crean o reutilizan `.venv`, usan PyTorch CPU y dejan una sola variante OpenCV (`opencv-contrib-python-headless`).
+   - Windows instala `requirements.windows.lock.txt` cuando existe.
+   - Linux usa `requirements.lock.txt` como [constraints de pip](https://pip.pypa.io/en/stable/user_guide/#constraints-files) de las dependencias de Plan A: fija sus versiones sin instalar CLIP ni extras descartados solo por estar en el freeze histórico. Usa el índice adicional CPU y reinstala headless con su versión exacta.
+   - Los instaladores **no sobrescriben** los locks. Un cambio de versiones se registra después de comprobarlo y por separado para cada sistema.
+   - `pip check` puede indicar que ultralytics requiere `opencv-python`: corresponde a la sustitución deliberada por la variante contrib headless. No ignores otros conflictos.
 
 4. Verifica:
    ```bash
@@ -429,13 +441,13 @@ E0 ──► E1 ─┐
    - Si `mediapipe` no instala o no importa en Python 3.12: **detente**, documenta el error y pregunta al usuario. No cambies de librería por tu cuenta.
    - Si Qt se queja de plugins "xcb", prueba con `os.environ.pop("QT_QPA_PLATFORM_PLUGIN_PATH", None)` después de `import cv2`. Si funciona, anótalo en PROGRESO para que E3 lo aplique.
 
-5. Descarga y exporta los modelos. **Ejecuta desde `models/`** para que los pesos queden ahí:
+5. Descarga y exporta los modelos. Los siguientes son comandos **Bash/Linux**; consulta README para Windows. Ejecuta desde `models/` para que los pesos queden ahí:
    ```bash
    mkdir -p models && cd models
-   ../.venv/bin/python -c "from ultralytics import YOLO; YOLO('yolov8n.pt').export(format='openvino', imgsz=640)"
+   ../.venv/bin/python -c "from ultralytics import YOLO; YOLO('yolov8n.pt').export(format='openvino', imgsz=480)"
    curl -L -o blaze_face_short_range.tflite https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/latest/blaze_face_short_range.tflite
    ```
-   Debe quedar `models/yolov8n.pt`, `models/yolov8n_openvino_model/` (con `metadata.yaml`) y `models/blaze_face_short_range.tflite`.
+   Debe quedar `models/yolov8n.pt`, `models/yolov8n_openvino_model/` (con `metadata.yaml`) y `models/blaze_face_short_range.tflite`. El tamaño de exportación debe coincidir con `config.IMGSZ`; E0 eligió 480.
    Después, vuelve a ejecutar la verificación de OpenCV del paso 4: un export puede autoinstalar paquetes.
 
 6. Escribe `tools/cam_check.py`:
@@ -512,7 +524,7 @@ E0 ──► E1 ─┐
 1. Implementa `Det` y `Detector` según el contrato de la sección 5.
    - Carga el modelo con `YOLO(str(config.MODEL_PATH), task="detect")`.
    - Calcula `available_keys` y un mapa `clave → id` a partir de `model.names`.
-   - Llamada a YOLO: `model.predict(frame_bgr, imgsz=config.IMGSZ, conf=conf, classes=ids, verbose=False)[0]`.
+   - Llamada a YOLO: `model.predict(frame_bgr, imgsz=config.IMGSZ, conf=conf, classes=ids, verbose=False, **predict_options)[0]`. Windows fija `device="intel:CPU"` y `torch.set_num_threads(1)`; Linux conserva su selección anterior. Calienta antes de consultar `model.names` para evitar una carga/compilación redundante. Estos ajustes no cambian clases ni puntaje.
    - Lee `r.boxes.xyxy`, `r.boxes.conf` y `r.boxes.cls` (pásalos a numpy con `.cpu().numpy()`).
    - Rostros con MediaPipe, en modo VIDEO (ver la sección 8). El timestamp en ms debe ser **estrictamente creciente**: usa `int(time.monotonic()*1000)` y, si no supera al anterior, súmale 1.
    - Recorta las cajas a los bordes del frame.
@@ -548,12 +560,13 @@ E0 ──► E1 ─┐
 
    Casos obligatorios:
    1. Sin claves: score 0, `level_text == NO_ITEMS_TEXT`, `badge False`.
-   2. "laptop" visto de forma continua desde t = 0: no está presente en t = 0.25 y sí en t = 0.35. `entered` contiene "laptop" **una sola vez** en toda la secuencia.
+   2. "laptop" visto de forma continua desde t = 0: no está presente en t = 0.25 y sí en t = 0.35. `entered` del scorer contiene "laptop" **una sola vez por ronda**.
    3. Un hueco de 0.5 s sin verlo lo mantiene presente. Un hueco de 0.8 s lo vuelve ausente, y al reaparecer necesita otros 0.3 s.
    4. "backpack", "book" y "laptop" presentes: score 55, `badge True`, `level_text == "Listo para el aula"`.
    5. `max_score` es la suma de los puntos de los UNI_ITEMS que están en `available_keys`. Pruébalo con un `available_keys` reducido.
    6. Una clave que no está en `available_keys` no suma.
    7. `reset()` deja todo en cero.
+   8. La ronda acumula objetos aunque se retiren, finaliza al cumplirse 60 s o reunir todos, conserva el resultado 5 s y evita encadenar rondas por objetos que siguen visibles. Los objetos que entran después del minuto no suman a la ronda terminada.
 
 **Criterios de aceptación de E2:**
 - [ ] `.venv/bin/python tests/test_scoring.py` imprime `OK`.
@@ -589,28 +602,28 @@ E0 ──► E1 ─┐
 
 - **Ventana:** `QMainWindow`, título `"VisionAI — Detector de Objetos en Tiempo Real"`, tamaño inicial 1440×860 y mínimo 1100×700.
 - **Fila de controles:**
-  - **Selector de cámara:** `QComboBox`. Al arrancar prueba los índices 0–5: abre, lee un frame y libera. Lista los que funcionan como `"Cámara N (ancho×alto)"` y preselecciona `CAMERA_INDEX_DEFAULT` si está, o el primero si no. Al cambiar de opción, libera la cámara actual y abre la nueva.
+  - **Selector de cámara:** `QComboBox`. Un `--camera N` explícito abre esa cámara directamente. Sin el argumento usa `CAMERA_INDEX_DEFAULT` o una disponible si no abre. Al desplegar la lista vuelve a buscar índices 0–5 y lista los que entregan imagen como `"Cámara N (ancho×alto)"`. Al cambiar de opción, libera la cámara actual y abre la nueva.
   - **Selector de modo:** dos `QPushButton` checables en un `QButtonGroup` exclusivo, con aspecto de botón segmentado.
   - **Interruptores:** `QCheckBox` Objetos, Personas y Rostros, todos activos por defecto.
   - **Confianza:** `QSlider` horizontal de 10 a 90, por defecto `CONF_DEFAULT*100`, con una etiqueta que muestra el %.
   - **Botones** `Capturar` y `Reiniciar`.
 - **Apertura de cámara:**
-  - `cv2.VideoCapture(idx, cv2.CAP_V4L2)`.
+  - Windows usa `cv2.VideoCapture(idx, cv2.CAP_DSHOW)`; MSMF solo sirve de respaldo si está disponible. Linux usa `cv2.CAP_V4L2`.
   - Configura `CAP_PROP_FOURCC` = MJPG, `FRAME_W`×`FRAME_H` y `CAP_PROP_BUFFERSIZE` = 1.
   - Si la cámara no soporta esa resolución, usa la que entregue.
-- **Bucle:** `QTimer` con intervalo de 1 ms. En cada tick:
-  1. `cap.read()` → `cv2.flip(frame, 1)` si `MIRROR`.
-  2. `detector.detect(frame, conf, grupos activos)`.
-  3. `stats_tracker.update({d.key for d in dets}, now)`. Por cada clave en `entered`, suma 1 a sus apariciones.
-  4. Convierte a `QImage` (ver la sección 8) y dibuja con QPainter **a la resolución del frame**, antes de escalar.
-  5. Muestra el resultado escalado en el `QLabel` con `KeepAspectRatio`.
+- **Bucle:** `QTimer` preciso con intervalo de 1 ms. Si no hay una inferencia en curso:
+  1. En el hilo de interfaz: `cap.read()` → `cv2.flip(frame, 1)` si `MIRROR`.
+  2. Se envía un frame propio y una copia de los controles al worker `QThread`, que ejecuta `detector.detect`.
+  3. Al recibir el resultado en la interfaz, se descarta si cambió la generación de controles. Se envía el siguiente trabajo antes de dibujar, sin acumular una cola.
+  4. Se actualizan estadísticas y puntaje con el reloj actual, se convierte a `QImage` RGB32 y se dibuja con QPainter **a la resolución del frame**.
+  5. Se muestra en el `QLabel` con `KeepAspectRatio` y se emite `frame_processed`; solo un resultado nuevo aceptado y dibujado cuenta para los FPS.
 - **Dibujo en modo General:**
   - Escala de tamaños `s = alto_frame / 720`.
   - Rectángulo de 3·s px, del color de su grupo en `config.COLORS`.
   - Encima, una "píldora" rellena del mismo color con texto blanco en negrita de 16·s px: `"Mochila 87%"`. Si no cabe arriba, va dentro de la caja.
   - Antialiasing activado.
 - **Panel lateral:** `QFrame` de 320 px de ancho. Se actualiza **cada 250 ms** con un QTimer propio, no en cada frame. Contiene:
-  - FPS: media móvil exponencial con α = 0.1 sobre el tiempo entre ticks.
+  - FPS: media móvil exponencial con α = 0.1 sobre el tiempo entre resultados nuevos dibujados.
   - Tiempo de sesión en mm:ss.
   - Modo actual.
   - "En pantalla": detecciones actuales con su %, ordenadas por confianza, máximo 8.
@@ -636,6 +649,8 @@ E0 ──► E1 ─┐
 - **Argumentos de línea de comandos** (`argparse`), para que los agentes puedan verificar:
   - `--camera N`: índice inicial.
   - `--mode general|uni`: modo inicial. En E3 basta con aceptar `general`; `uni` se implementa en E4.
+  - `--quality detail|fast`: selecciona el modelo Plan A 480 o 320, respectivamente. No cambia controles, clases, rostros ni reglas de puntaje. El perfil 320 puede perder detecciones pequeñas o lejanas; validar objetos reales y FPS antes de adoptarlo como predeterminado.
+  - `--resolution 640x480|1280x720`: resolución solicitada a la cámara, independiente de la entrada del modelo. El driver puede entregar otro tamaño; anotar el efectivo.
   - `--autoshot SEG`:
     - A los SEG segundos guarda `self.grab()` (la ventana completa) en `capturas/autoshot.png`.
     - Imprime en stdout `AUTOSHOT fps=<promedio> frames=<n> path=capturas/autoshot.png`. El promedio son los frames procesados después de los 2 primeros segundos divididos entre su tiempo.
@@ -645,7 +660,7 @@ E0 ──► E1 ─┐
 - [ ] `.venv/bin/python app.py --autoshot 8` sale con código 0 e imprime la línea AUTOSHOT con **fps ≥ 15**. Pide al usuario que se siente frente a la cámara.
 - [ ] Al revisar `capturas/autoshot.png` con Read se ven: el video, cajas con etiquetas en español y %, el panel con FPS y listas, y todos los controles.
 - [ ] **[USUARIO]** Prueba manual: cambiar de cámara funciona; cada interruptor oculta y muestra su grupo; el slider cambia la cantidad de detecciones; Capturar crea un PNG en `capturas/`; Reiniciar pone las estadísticas en cero; los atajos funcionan.
-- [ ] Desconectar la cámara (o elegir el índice 1, que es de metadatos) muestra el mensaje y la app no se cierra.
+- [ ] Desconectar una cámara USB o elegir un índice no disponible muestra el mensaje y la app no se cierra. No uses el índice 1 como prueba de error en Windows: es la cámara integrada verificada.
 
 ---
 
@@ -664,12 +679,12 @@ E0 ──► E1 ─┐
 - **En cada tick:** `state = uni_scorer.update({d.key for d in dets}, now)`. El mejor puntaje de la sesión es `max(best, state.score)`.
 - **Cajas:** color `COLORS["uni"]`, con la píldora `"Laptop +25 · 87%"` (etiqueta, puntos y confianza).
 - **HUD:** franja superior negra con alfa 160 y 120·s px de alto, dibujada con QPainter.
-  - **Izquierda:** puntaje grande, `"55"` en negrita a 44·s px, con `"de 75 pts"` debajo (usa `state.max_score`).
+  - **Izquierda:** puntaje grande, `"55"` en negrita a 44·s px, con `"de 60 pts"` debajo en Plan A (usa `state.max_score`).
   - **Centro:** barra de progreso redondeada de ancho 50 % del frame y alto 18·s px.
     - El valor mostrado se anima con `disp += (score - disp) * 0.15` en cada frame.
     - Relleno `accent` si score < `UNI_THRESHOLD` y `gold` si es igual o mayor.
     - Debajo, `state.level_text` a 22·s px.
-  - **Fila de chips:** uno por cada ítem de UNI_ITEMS disponible, `"Mochila +10"`. Encendido (fondo `gold`, texto oscuro) si está presente; apagado (fondo gris oscuro, texto `muted`) si no. Así el público ve qué le falta.
+  - **Fila de chips:** uno por cada ítem de UNI_ITEMS disponible, `"Mochila +10"`. Encendido (fondo `gold`, texto oscuro) si está guardado en `state.collected`; apagado si aún no se guardó. Retirar el objeto no apaga su chip dentro de la ronda.
 - **Badge:** si `state.badge`, se dibuja un rectángulo redondeado centrado en el tercio inferior del frame.
   - Fondo `gold`, texto oscuro `UNI_BADGE_TEXT` en negrita a 44·s px.
   - La opacidad pulsa: `alpha = 200 + 55*sin(t*4)`.
@@ -678,14 +693,14 @@ E0 ──► E1 ─┐
   - Dura 1.0 s: el texto `"+25 pts"` sube 60·s px y su alfa baja de 255 a 0.
   - Va en `gold`, en negrita a 32·s px, con una sombra oscura desplazada 2 px.
   - Las animaciones vencidas se eliminan.
-- **Panel lateral en este modo:** agrega "Puntaje actual", "Mejor puntaje de la sesión" y la lista de ítems presentes con su título de nivel.
+- **Panel lateral en este modo:** agrega "Puntaje actual", "Mejor puntaje de la sesión", "Tiempo de la ronda" e "Ítems guardados" con su título de nivel. La lista "En pantalla" refleja las detecciones actuales, separada de lo acumulado.
 - `--mode uni` debe funcionar.
 
 **Criterios de aceptación de E4:**
 - [ ] `tests/test_scoring.py` sigue imprimiendo `OK`.
 - [ ] **[USUARIO]** Sin objetos: `app.py --mode uni --autoshot 8` → en el PNG se ven `0`, `"Aún no estás listo..."`, todos los chips apagados y fps ≥ 15.
 - [ ] **[USUARIO]** Con mochila, libro y laptop visibles, en el mismo comando el PNG muestra ≥ 55, `"Listo para el aula"`, el badge `NIVEL UNIVERSITARIO` y sus chips encendidos.
-- [ ] **[USUARIO]** En vivo: al mostrar un objeto, el puntaje sube en menos de 1 s y aparece "+X pts". Al retirarlo, baja en menos de 1.5 s. La barra se anima suave. La interfaz no parpadea.
+- [ ] **[USUARIO]** En vivo: al mostrar un objeto estable, el puntaje sube en menos de 1 s y aparece "+X pts". Al retirarlo, su caja y "En pantalla" se actualizan, mientras el puntaje y el chip guardado se mantienen. La barra se anima suave y la interfaz no parpadea. Comprobar fin por tiempo, fin al reunir los 4, resultado durante 5 s y siguiente ronda sin arranque automático por objetos heredados.
 
 ---
 
@@ -701,10 +716,10 @@ E0 ──► E1 ─┐
    - En cada frame, calcula el brillo medio de `cv2.cvtColor(cv2.resize(frame, (64, 36)), cv2.COLOR_BGR2GRAY)`.
    - Si se mantiene menor que `LOW_LIGHT_MEAN` durante más de 1 s, dibuja una franja inferior amarilla: `"Poca luz: la detección puede fallar. Acerca una lámpara."`.
    - En el panel, agrega un indicador "Luz: OK / Baja".
-2. **Ajuste de FPS.** Mide con `--autoshot` en ambos modos. Si alguno da menos de 15, aplica estas medidas **en orden** y detente en cuanto se cumpla:
-   1. Re-exporta el modelo con `imgsz=480` y pon `IMGSZ = 480`.
-   2. Captura a 960×540.
-   3. Mueve la captura y la detección a un `QThread` que emita `(frame, dets)`; el hilo de la interfaz solo dibuja.
+2. **Ajuste de FPS.** Mide con `--autoshot` en ambos modos y separa captura, inferencia y dibujo. No copies un ajuste Linux sin medirlo en Windows. Si alguno da menos de 15, evalúa estas medidas y detente cuando se cumpla con evidencia real:
+   1. La exportación 480 ya fue elegida en E0. En Windows se compara con el perfil `fast` 320, exportado en carpeta separada y con los mismos pesos FP32. Verificar las clases, detecciones de referencia, objetos reales y FPS; no asumir que conserva la precisión para objetos pequeños ni activarlo por defecto sin esa validación.
+   2. Medir captura a 640×480 y 1280×720 con `--resolution`; en esta cámara Windows pedir 960×540 entrega realmente 640×480. No modificar la resolución Linux basándose solo en ese resultado Windows.
+   3. La detección ya se trasladó a un `QThread`, con un solo trabajo en curso. DirectShow conserva captura y cierre en el hilo de interfaz. Medir el resultado completo; un repintado no acredita una detección nueva.
 
    Anota cada medición en PROGRESO.
 3. **Pulido visual del QSS:**
@@ -715,14 +730,14 @@ E0 ──► E1 ─┐
    - Slider con color `accent`.
    - Verifícalo con un autoshot. Nada de librerías de temas externas.
 4. **`README.md`**, para humanos y en español:
-   - Requisitos, incluido `sudo apt install libxcb-cursor0`.
-   - `./setup.sh`.
+   - Requisitos por sistema; `libxcb-cursor0` solo en Linux.
+   - Instaladores `setup.ps1` (Windows) y `setup.sh` (Linux), con sus locks separados.
    - Cómo descargar o exportar los modelos (los comandos de E0).
-   - `.venv/bin/python app.py [--camera N]`.
+   - `.\.venv\Scripts\python.exe app.py --camera 1` en Windows; `.venv/bin/python app.py [--camera N]` en Linux.
    - Atajos de teclado y descripción de los modos.
    - Problemas comunes: cámara equivocada, poca luz, error del plugin Qt xcb.
 5. **[USUARIO]** Checklist final (anota el resultado):
-   - Arranque en frío con la cámara externa.
+   - Arranque en frío con la cámara del equipo de demo (integrada índice 1 en Windows; USB índice 2 en el equipo Linux histórico).
    - Ambos modos.
    - Cada interruptor.
    - Captura.
@@ -730,7 +745,7 @@ E0 ──► E1 ─┐
    - Poca luz (tapar parcialmente la cámara).
    - Objeto parcialmente fuera del cuadro.
    - Quitar y poner objetos rápido.
-   - Desconectar y reconectar la cámara.
+   - Desconectar y reconectar una cámara USB, si se dispone de ella. La integrada no se puede desenchufar físicamente: registra esta limitación, sin dar por hecha una prueba que no se realizó.
    - 10 minutos seguidos sin errores ni fuga de memoria evidente (revisa con `top`).
 
 **Criterios de aceptación de E5:**
@@ -767,7 +782,7 @@ E0 ──► E1 ─┐
    - App abierta y probada 10 minutos antes.
    - Fondo despejado.
    - Video de respaldo listo para reproducir si falla la cámara.
-5. **Instrucciones para grabar el video de respaldo** **[USUARIO]**: 2 a 3 minutos mostrando ambos modos, con el grabador de pantalla de GNOME (`Ctrl+Alt+Shift+R`) o con OBS. El agente no lo graba.
+5. **Instrucciones para grabar el video de respaldo** **[USUARIO]**: 2 a 3 minutos mostrando ambos modos. En Windows, el guion explica Xbox Game Bar y una alternativa con celular. SimpleScreenRecorder corresponde al equipo Linux histórico; no presupongas que hay GNOME, OBS u otro grabador instalado. El agente no graba ni da por grabado el video con una prueba automática.
 
 **Criterios de aceptación de E6:**
 - [ ] `GUION_DEMO.md` completo, con los FPS reales y el Plan (A o B) correctos.
@@ -834,10 +849,10 @@ Trampa: el `QLabel` del video necesita `setSizePolicy(QSizePolicy.Ignored, QSize
 **YOLOv8n (Ultralytics, 2023)**
 - Detector de una sola etapa y sin anchors.
 - Flujo interno:
-  1. *Letterbox*: redimensiona a 640 manteniendo la proporción.
+   1. *Letterbox*: redimensiona a la entrada configurada manteniendo la proporción: 480 en `detail`, 320 en `fast`.
   2. *Backbone* CSPDarknet con bloques C2f.
   3. *Neck* PAN-FPN, que mezcla las 3 escalas.
-  4. *Head* desacoplado, que predice cajas (DFL) y puntajes de clase en 3 escalas (strides 8/16/32 → 80×80 + 40×40 + 20×20 = 8400 candidatos).
+   4. *Head* desacoplado, que predice cajas (DFL) y puntajes de clase en 3 escalas (strides 8/16/32 → **2100 candidatos** con entrada cuadrada 320; **4725** con 480; **8400** con 640).
   5. Filtro por confianza.
   6. NMS (IoU 0.7 por defecto en Ultralytics).
 - Tamaño y precisión: 3.2 M parámetros, 8.7 GFLOPs, mAP50-95 de 37.3 en COCO val2017 (a 640).
@@ -852,7 +867,7 @@ Trampa: el `QLabel` del video necesita `setSizePolicy(QSizePolicy.Ignored, QSize
 
 **OpenVINO**
 - Toolkit de Intel que optimiza el grafo del modelo para CPU y GPU Intel.
-- En este equipo sin GPU NVIDIA es lo que permite superar los 15 FPS. Usa los números del benchmark de E0.
+- El benchmark Linux de E0 obtuvo 26–28 ms a 480, frente a 31.1 ms con PyTorch; a 640 OpenVINO fue más lento. La entrada de 480 y el turbo también influyeron. No atribuyas a OpenVINO por sí solo el cumplimiento de 15 FPS ni traslades esos números al equipo Windows.
 
 **YOLO-World (solo Plan B)**
 - "YOLO-World: Real-Time Open-Vocabulary Object Detection", Cheng et al., CVPR 2024.
@@ -861,7 +876,7 @@ Trampa: el `QLabel` del video necesita `setSizePolicy(QSizePolicy.Ignored, QSize
 
 **Antiparpadeo**
 - Un objeto cuenta como presente tras 0.3 s estable y deja de contar 0.7 s después de dejar de verse.
-- Evita que el puntaje salte por detecciones intermitentes y ayuda con los objetos parciales.
+- Filtra entradas breves y mantiene la presencia durante huecos cortos. La ronda acumula puntos y no los resta al retirar objetos; esa conservación no es consecuencia del hold de 0.7 s.
 
 Si hay acceso web, verifica estos números en la documentación oficial antes de cerrar E6. Si no, úsalos tal cual.
 

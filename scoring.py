@@ -22,15 +22,19 @@ class PresenceTracker:
                 self._state[k] = [now, now]
             else:
                 st[1] = now
-        present = {
-            k for k, (first, last) in self._state.items()
-            if now - last <= self.hold_s and last - first >= self.enter_s
-        }
+        present = self.present(now)
         entered = present - self._prev_present
         self._prev_present = present
         # Olvida las rachas vencidas
         self._state = {k: st for k, st in self._state.items() if now - st[1] <= self.hold_s}
         return present, entered
+
+    def present(self, now: float) -> set[str]:
+        """Consulta las presencias vigentes sin añadir observaciones ni alterar las rachas."""
+        return {
+            k for k, (first, last) in self._state.items()
+            if now - last <= self.hold_s and last - first >= self.enter_s
+        }
 
     def reset(self) -> None:
         self._state: dict[str, list[float]] = {}  # clave → [first, last]
@@ -65,23 +69,34 @@ class UniScorer:
         self.reset()
 
     def update(self, keys: set[str], now: float) -> UniState:
+        self._advance_time(now)
         present_set, entered_set = self.tracker.update(keys & self.items.keys(), now)
-        if self._phase == "result" and now - self._end >= config.UNI_RESULT_S:
-            self._phase, self._collected = "waiting", set()
         # Solo un objeto que entra arranca la ronda: los que siguen a la vista desde la anterior no
         # la reinician solos (si no, con todo en cuadro las rondas se encadenarían sin fin)
         if self._phase == "waiting" and entered_set:
             self._phase, self._start = "running", now
         new: set[str] = set()
         if self._phase == "running":
-            if now - self._start >= config.UNI_ROUND_S:
-                self._finish(now, 0.0)  # lo que aparece después del tiempo ya no cuenta
-            else:
-                new = present_set - self._collected
-                self._collected |= new
-                if len(self._collected) == len(self.items):
-                    self._finish(now, config.UNI_ROUND_S - (now - self._start))
+            new = present_set - self._collected
+            self._collected |= new
+            if len(self._collected) == len(self.items):
+                self._finish(now, config.UNI_ROUND_S - (now - self._start))
+        return self._snapshot(now, present_set, new)
 
+    def advance(self, now: float) -> UniState:
+        """Avanza reloj y resultado sin un frame nuevo: no suma puntos ni cambia el tracker."""
+        self._advance_time(now)
+        return self._snapshot(now, self.tracker.present(now), set())
+
+    def _advance_time(self, now: float) -> None:
+        deadline = self._start + config.UNI_ROUND_S
+        if self._phase == "running" and now >= deadline:
+            # El resultado vence cinco segundos después del límite real, aunque no lleguen frames.
+            self._finish(deadline, 0.0)
+        if self._phase == "result" and now - self._end >= config.UNI_RESULT_S:
+            self._phase, self._collected = "waiting", set()
+
+    def _snapshot(self, now: float, present_set: set[str], new: set[str]) -> UniState:
         collected = [k for k in self.items if k in self._collected]
         # Cada clave suma una sola vez, aunque haya varias detecciones de ella
         score = sum(self.items[k][1] for k in collected)

@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 
 import cv2
-from PySide6.QtCore import QRectF, Qt, QTimer
+from PySide6.QtCore import QObject, QRectF, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import (QColor, QFont, QFontDatabase, QFontMetrics, QImage, QKeySequence, QPainter,
                            QPalette, QPen, QPixmap, QShortcut)
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QFrame, QGridLayout,
@@ -35,27 +35,34 @@ LOW_LIGHT_S = 1.0                  # segundos seguidos con poca luz antes de avi
 LOW_LIGHT_TEXT = "Poca luz: la detección puede fallar. Acerca una lámpara."
 LOW_LIGHT_BG = "#ffd23f"
 RETRY_MS = 2000                    # sin cámara: cada cuánto se reintenta abrirla
-CROP_TOP = 4                       # filas superiores descartadas: la cámara USB las manda dañadas (franja blanca)
+CROP_TOP = 0 if sys.platform == "win32" else 4  # solo la cámara USB de Linux necesita quitar la franja superior
 WARN_S = 10                        # últimos segundos de la ronda: el reloj se pone rojo
 WARN_COLOR = "#ff6b6b"
 ROUND_CAPTIONS = {"waiting": "Muestra un objeto", "running": "restantes", "result": "ronda terminada"}
 ROUND_STATUS = {"waiting": "Esperando", "result": "Terminada"}  # panel; en "running" se muestra el reloj
 
-# Sin esto, cada reintento con la cámara desconectada llena la terminal de avisos de V4L2
-cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
+# Evita los avisos repetidos de cámara; la API de logging cambia entre OpenCV 4 y 5.
+if hasattr(cv2, "setLogLevel"):
+    cv2.setLogLevel(2)  # LOG_LEVEL_ERROR
+else:
+    cv_logging = getattr(getattr(cv2, "utils", None), "logging", None)
+    if cv_logging is not None:
+        cv_logging.setLogLevel(cv_logging.LOG_LEVEL_ERROR)
 
 
 def open_camera(idx: int) -> cv2.VideoCapture | None:
     """Abre la cámara en MJPG a FRAME_W×FRAME_H (si no la soporta, queda la que entregue). None si no abre."""
-    cap = cv2.VideoCapture(idx, cv2.CAP_V4L2)
-    if not cap.isOpened():
+    backends = (cv2.CAP_DSHOW, cv2.CAP_MSMF) if sys.platform == "win32" else (cv2.CAP_V4L2,)
+    for backend in backends:
+        cap = cv2.VideoCapture(idx, backend)
+        if cap.isOpened():
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.FRAME_W)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.FRAME_H)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            return cap
         cap.release()
-        return None
-    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.FRAME_W)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.FRAME_H)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    return cap
+    return None
 
 
 def probe_cameras(skip: int | None = None) -> list[tuple[int, int, int]]:
@@ -86,10 +93,10 @@ def key_group(key: str) -> str:
 
 
 def to_qimage(frame_bgr) -> QImage:
-    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-    h, w, _ = rgb.shape
-    # copy(): la QImage no debe depender del buffer de numpy
-    return QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888).copy()
+    h, w, _ = frame_bgr.shape
+    image = QImage(frame_bgr.data, w, h, frame_bgr.strides[0], QImage.Format.Format_BGR888)
+    # RGB32 acelera QPainter/QPixmap y crea un buffer propio, sin perder color de 8 bits.
+    return image.convertToFormat(QImage.Format.Format_RGB32)
 
 
 def px_font(px: float, bold: bool = True) -> QFont:
@@ -159,7 +166,29 @@ class CameraCombo(QComboBox):
         super().showPopup()
 
 
+class InferenceWorker(QObject):
+    """Ejecuta solo el detector. La cámara y todos los widgets pertenecen al hilo de la interfaz."""
+    finished = Signal(object, object, object)
+
+    def __init__(self, detector: Detector) -> None:
+        super().__init__()
+        self.detector = detector
+
+    @Slot(object)
+    def run(self, job) -> None:
+        try:
+            dets = self.detector.detect(job["frame"], job["conf"], job["groups"],
+                                        only_keys=job["only_keys"])
+        except Exception as error:
+            self.finished.emit(job, None, f"{type(error).__name__}: {error}")
+        else:
+            self.finished.emit(job, dets, None)
+
+
 class MainWindow(QMainWindow):
+    frame_processed = Signal(object, object)  # (grupos del frame aceptado, (ancho, alto))
+    inference_requested = Signal(object)
+
     def __init__(self, detector: Detector, cameras: list[tuple[int, int, int]],
                  camera_idx: int | None, mode: str) -> None:
         super().__init__()
@@ -180,6 +209,10 @@ class MainWindow(QMainWindow):
         self.low_light = False
         self.loop_start = time.monotonic()
         self.shot_frames = 0
+        self._generation = 0
+        self._inflight = None               # permanece ocupado aunque se invalide su generación
+        self._inference_error = False
+        self._closing = False
         self.reset_session()
 
         self.setWindowTitle("VisionAI — Detector de Objetos en Tiempo Real")
@@ -189,6 +222,7 @@ class MainWindow(QMainWindow):
         self._build_shortcuts()
 
         self.frame_timer = QTimer(self)
+        self.frame_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.frame_timer.setInterval(1)
         self.frame_timer.timeout.connect(self.tick)
         self.panel_timer = QTimer(self)
@@ -198,6 +232,16 @@ class MainWindow(QMainWindow):
         self.retry_timer = QTimer(self)
         self.retry_timer.setInterval(RETRY_MS)
         self.retry_timer.timeout.connect(self.retry_camera)
+
+        self.inference_thread = QThread(self)
+        self.inference_thread.setObjectName("VisionAIInference")
+        self.inference_worker = InferenceWorker(detector)
+        self.inference_worker.moveToThread(self.inference_thread)
+        self.inference_requested.connect(self.inference_worker.run, Qt.ConnectionType.QueuedConnection)
+        self.inference_worker.finished.connect(self.on_inference_finished, Qt.ConnectionType.QueuedConnection)
+        self.inference_thread.finished.connect(self.inference_worker.deleteLater)
+        self.inference_thread.start()
+        QApplication.instance().aboutToQuit.connect(self.shutdown)
 
         self._select_initial_camera(cameras, camera_idx)
         self.set_mode(mode)
@@ -273,6 +317,7 @@ class MainWindow(QMainWindow):
         for group, name in GROUPS.items():
             cb = QCheckBox(name)
             cb.setChecked(True)
+            cb.toggled.connect(self.invalidate_inference)
             self.group_checks[group] = cb
             row.addWidget(cb)
         row.addSpacing(16)
@@ -409,8 +454,15 @@ class MainWindow(QMainWindow):
             self.use_camera(cap)
 
     def use_camera(self, cap: cv2.VideoCapture) -> None:
+        self.invalidate_inference()
         self.retry_timer.stop()
         self.cap = cap
+        # --camera abre directamente, sin sondear las demás; conserva su entrada en el selector.
+        if self.camera_combo.findData(self.camera_idx) < 0:
+            w, h = (int(cap.get(p)) for p in (cv2.CAP_PROP_FRAME_WIDTH, cv2.CAP_PROP_FRAME_HEIGHT))
+            self.camera_combo.addItem(f"Cámara {self.camera_idx} ({w}×{h})", self.camera_idx)
+            self.camera_combo.setPlaceholderText("Elige una cámara")
+        self.sync_camera_combo()
         self.read_fails = 0
         self.fps_dt = self.last_tick = None
         self.dark_since = None
@@ -418,6 +470,7 @@ class MainWindow(QMainWindow):
         self.frame_timer.start()
 
     def close_camera(self) -> None:
+        self.invalidate_inference()
         self.frame_timer.stop()
         self.retry_timer.stop()
         if self.cap is not None:
@@ -453,8 +506,16 @@ class MainWindow(QMainWindow):
 
     # --- Bucle de video ---
 
+    def invalidate_inference(self, _checked=False) -> None:
+        """Los controles invalidan el resultado pendiente, sin crear una segunda inferencia en cola."""
+        self._generation += 1
+        if self._inference_error:
+            self._inference_error = False
+            if not self._closing and self.cap is not None and hasattr(self, "frame_timer"):
+                self.frame_timer.start()
+
     def tick(self) -> None:
-        if self.cap is None:
+        if self._closing or self._inference_error or self.cap is None or self._inflight is not None:
             return
         ok, frame = self.cap.read()
         if not ok or frame is None or frame.size == 0:
@@ -466,22 +527,49 @@ class MainWindow(QMainWindow):
         frame = frame[CROP_TOP:]
         if config.MIRROR:
             frame = cv2.flip(frame, 1)
+        else:
+            frame = frame.copy()  # el siguiente read no puede alterar el buffer que recibe el worker
         # Brillo medio sobre una miniatura en gris: barato y suficiente para avisar de poca luz
         brightness = float(cv2.cvtColor(cv2.resize(frame, (64, 36)), cv2.COLOR_BGR2GRAY).mean())
 
         uni = self.mode == "uni"
-        if uni:
-            # Solo objetos universitarios: sin personas ni rostros, para ganar FPS
-            dets = self.detector.detect(frame, self.conf, {"objetos"}, only_keys=UNI_KEYS)
-        else:
-            groups = {g for g, cb in self.group_checks.items() if cb.isChecked()}
-            dets = self.detector.detect(frame, self.conf, groups)
+        groups = {"objetos"} if uni else {g for g, cb in self.group_checks.items() if cb.isChecked()}
+        job = {"generation": self._generation, "frame": frame, "conf": self.conf,
+               "groups": frozenset(groups), "only_keys": frozenset(UNI_KEYS) if uni else None,
+               "mode": self.mode, "brightness": brightness}
+        self._inflight = job
+        self.inference_requested.emit(job)
+
+    @Slot(object, object, object)
+    def on_inference_finished(self, job, dets, error) -> None:
+        if self._inflight is not job:
+            return  # una entrega duplicada nunca cuenta como otro frame
+        self._inflight = None
+        if self._closing:
+            return
+        if job["generation"] != self._generation or self.cap is None:
+            if self.frame_timer.isActive():
+                self.tick()
+            return
+        if error is not None:
+            self._inference_error = True
+            self.frame_timer.stop()
+            self.fps_dt = self.last_tick = None
+            self.statusBar().showMessage(f"Error de detección: {error}. Cambia un control o reinicia para reintentar.")
+            return
+        # La siguiente inferencia avanza mientras la interfaz dibuja este resultado.
+        if self.frame_timer.isActive():
+            self.tick()
+        if self._closing or job["generation"] != self._generation or self.cap is None:
+            return
+        frame, uni = job["frame"], job["mode"] == "uni"
+        # Scoring siempre usa el reloj actual de la GUI, nunca un timestamp del worker.
         now = time.monotonic()
         _, entered = self.stats_tracker.update({d.key for d in dets}, now)
         for k in entered:
             self.appearances[k] = self.appearances.get(k, 0) + 1
         self.last_dets = dets
-        self.update_light(brightness, now)
+        self.update_light(job["brightness"], now)
         if uni:
             self.update_uni(dets, now)
 
@@ -499,12 +587,14 @@ class MainWindow(QMainWindow):
         self.last_image = img
         self.show_image(img, now)
 
+        displayed_at = time.monotonic()
         if self.last_tick is not None:
-            dt = now - self.last_tick
+            dt = displayed_at - self.last_tick
             self.fps_dt = dt if self.fps_dt is None else self.fps_dt + FPS_ALPHA * (dt - self.fps_dt)
-        self.last_tick = now
-        if now - self.loop_start >= AUTOSHOT_WARMUP_S:
+        self.last_tick = displayed_at
+        if displayed_at - self.loop_start >= AUTOSHOT_WARMUP_S:
             self.shot_frames += 1
+        self.frame_processed.emit(set(job["groups"]), (img.width(), img.height()))
 
     def update_light(self, brightness: float, now: float) -> None:
         """Poca luz = brillo medio bajo LOW_LIGHT_MEAN durante más de LOW_LIGHT_S seguidos."""
@@ -705,6 +795,8 @@ class MainWindow(QMainWindow):
 
     def set_mode(self, mode: str) -> None:
         entering_uni = mode == "uni" and self.mode != "uni"
+        if mode != self.mode:
+            self.invalidate_inference()
         self.mode = mode
         self.mode_buttons[mode].setChecked(True)
         uni = mode == "uni"
@@ -721,6 +813,8 @@ class MainWindow(QMainWindow):
         self.set_mode("uni" if self.mode == "general" else "general")
 
     def on_conf_changed(self, value: int) -> None:
+        if self.conf != value / 100:
+            self.invalidate_inference()
         self.conf = value / 100
         self.conf_label.setText(f"{value}%")
 
@@ -751,6 +845,7 @@ class MainWindow(QMainWindow):
         self.reset_uni()
 
     def reset_uni(self) -> None:
+        self.invalidate_inference()
         self.uni_scorer.reset()
         self.uni_state = self.uni_scorer.update(set(), time.monotonic())
         self.score_disp = 0.0                    # valor animado que muestra la barra
@@ -764,8 +859,9 @@ class MainWindow(QMainWindow):
     # --- Panel lateral ---
 
     def update_panel(self) -> None:
+        now = time.monotonic()
         self.fps_value.setText(f"{1 / self.fps_dt:.1f}" if self.cap is not None and self.fps_dt else "—")
-        elapsed = int(time.monotonic() - self.session_start)
+        elapsed = int(now - self.session_start)
         self.time_value.setText(f"{elapsed // 60:02d}:{elapsed % 60:02d}")
         self.mode_value.setText(MODE_NAMES[self.mode])
         if self.cap is None:
@@ -776,6 +872,8 @@ class MainWindow(QMainWindow):
 
         uni = self.mode == "uni"
         if uni:
+            # El reloj sigue avanzando sin cámara, sin simular detecciones ni reiniciar sus rachas.
+            self.uni_state = self.uni_scorer.advance(now)
             st = self.uni_state
             self.score_value.setText(f"{st.score} / {st.max_score}")
             self.round_value.setText(clock(st.time_left) if st.phase == "running" else ROUND_STATUS[st.phase])
@@ -815,9 +913,21 @@ class MainWindow(QMainWindow):
         if self.cap is None and self.last_image is not None:
             self.show_image(self.last_image, time.monotonic())
 
-    def closeEvent(self, event) -> None:
+    @Slot()
+    def shutdown(self) -> None:
+        """Cierre idempotente para la ventana y para QApplication.quit() (incluido --autoshot)."""
+        if self._closing:
+            return
+        self._closing = True
         self.panel_timer.stop()
         self.close_camera()
+        self.inference_thread.requestInterruption()
+        self.inference_thread.quit()
+        self.inference_thread.wait()
+        self._inflight = None
+
+    def closeEvent(self, event) -> None:
+        self.shutdown()
         super().closeEvent(event)
 
 
@@ -882,14 +992,22 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="VisionAI — detector de objetos en tiempo real")
     ap.add_argument("--camera", type=int, metavar="N", help="índice inicial de la cámara")
     ap.add_argument("--mode", choices=list(MODE_NAMES), default="general", help="modo inicial")
+    ap.add_argument("--quality", choices=list(config.MODEL_PROFILES), default=config.DEFAULT_QUALITY,
+                    help="detail: entrada 480; fast: entrada 320, más FPS y menos detalle en objetos pequeños")
+    ap.add_argument("--resolution", choices=("640x480", "1280x720"),
+                    help="resolución solicitada a la cámara; 720p limita esta cámara a unos 10 FPS")
     ap.add_argument("--autoshot", type=float, metavar="SEG",
                     help="a los SEG segundos guarda capturas/autoshot.png, imprime los FPS y sale")
     args = ap.parse_args()
 
+    config.MODEL_PATH, config.IMGSZ = config.MODEL_PROFILES[args.quality]
+    if args.resolution:
+        config.FRAME_W, config.FRAME_H = map(int, args.resolution.split("x"))
+
     app = QApplication(sys.argv[:1])
     apply_theme(app)
     detector = Detector()
-    cameras = probe_cameras()
+    cameras = probe_cameras() if args.camera is None else []
     win = MainWindow(detector, cameras, args.camera, args.mode)
     win.show()
     if args.autoshot is not None:
