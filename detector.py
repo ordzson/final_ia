@@ -28,7 +28,7 @@ class Det:
 def _group_of(key: str) -> str:
     return "personas" if key in config.PERSON_KEYS else "objetos"
 
-
+#validación de la detección de objetos y rostros en imágenes
 def _clip_box(x1: float, y1: float, x2: float, y2: float,
               w: int, h: int) -> tuple[int, int, int, int] | None:
     """Recorta la caja a los bordes del frame. Devuelve None si queda sin área."""
@@ -38,7 +38,7 @@ def _clip_box(x1: float, y1: float, x2: float, y2: float,
         return None
     return x1, y1, x2, y2
 
-
+#los libros y cuadernos se detectan con YOLO, pero el modelo de útiles escolares no distingue entre ellos.
 def _overlaps_notebook(book: Det, notebook: Det) -> bool:
     x1, y1, x2, y2 = book.box
     nx1, ny1, nx2, ny2 = notebook.box
@@ -119,7 +119,6 @@ class Detector:
         """
         if frame_bgr is None or frame_bgr.size == 0:
             return []
-        # OpenMP puede iniciar otro contexto al trasladar la inferencia a QThread.
         thread_id = threading.get_ident()
         if thread_id != self._torch_thread_id:
             torch.set_num_threads(self._torch_threads)

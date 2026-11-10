@@ -111,7 +111,7 @@ def clock(seconds: float) -> str:
     total = math.ceil(round(max(0.0, seconds), 3))
     return f"{total // 60}:{total % 60:02d}"
 
-
+#Dibuja un rectángulo y una píldora con el nombre de la clase sobre la caja
 def draw_box(p: QPainter, box: tuple[int, int, int, int], color: QColor, text: str,
              font: QFont, s: float, img_w: int, text_color: str = "white", top: float = 0,
              taken: list[QRectF] | None = None) -> None:
@@ -233,7 +233,8 @@ class MainWindow(QMainWindow):
         self.retry_timer = QTimer(self)
         self.retry_timer.setInterval(RETRY_MS)
         self.retry_timer.timeout.connect(self.retry_camera)
-
+#aqui se crea un hilo para la inferencia de detección de objetos, 
+# separando la carga de trabajo del hilo principal de la interfaz gráfica
         self.inference_thread = QThread(self)
         self.inference_thread.setObjectName("VisionAIInference")
         self.inference_worker = InferenceWorker(detector)
@@ -305,7 +306,9 @@ class MainWindow(QMainWindow):
             btn.setMinimumWidth(QFontMetrics(bold).horizontalAdvance(name) + 40)
             self.mode_group.addButton(btn)
             self.mode_buttons[mode] = btn
+            #cambio al modo general o universitario;
             btn.clicked.connect(lambda _=False, m=mode: self.set_mode(m))
+
             seg.addWidget(btn)
         row.addLayout(seg)
         row.addStretch(1)
@@ -324,6 +327,7 @@ class MainWindow(QMainWindow):
         row.addSpacing(16)
 
         row.addWidget(QLabel("Confianza"))
+        # Slider de confianza: 10-90 → 0.1-0.9
         self.conf_slider = QSlider(Qt.Orientation.Horizontal)
         self.conf_slider.setRange(10, 90)
         self.conf_slider.setValue(round(config.CONF_DEFAULT * 100))
@@ -603,7 +607,7 @@ class MainWindow(QMainWindow):
         p.end()
         self.last_image = img
         self.show_image(img, now)
-
+#calcula FPS y tiempo de sesión; cuenta los frames que se muestran después del warmup
         displayed_at = time.monotonic()
         if self.last_tick is not None:
             dt = displayed_at - self.last_tick
@@ -637,7 +641,8 @@ class MainWindow(QMainWindow):
         s = img_h / 720
         font = px_font(16 * s)
         taken: list[QRectF] = []
-        # Mayor confianza primero: esa píldora queda en su sitio y las demás se apartan
+        #muy útil cuando hay varias detecciones de la misma clase, como "persona" y "rostro"
+        #Muestra primero la detección más confiable de cada clase, y las demás se dibujan debajo
         for d in sorted(dets, key=lambda d: d.conf, reverse=True):
             draw_box(p, d.box, QColor(config.COLORS[d.group]), f"{d.label} {d.conf:.0%}", font, s, img_w,
                      taken=taken)
@@ -1024,9 +1029,11 @@ def apply_theme(app: QApplication) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description="VisionAI — detector de objetos en tiempo real")
     ap.add_argument("--camera", type=int, metavar="N", help="índice inicial de la cámara")
+    #Cambio de modelo: general (objetos) o uni (Universitario)
     ap.add_argument("--mode", choices=list(MODE_NAMES), default="general", help="modo inicial")
     ap.add_argument("--uni-round", action="store_true", help="usa la ronda acumulativa de 60 s en Universitario")
     ap.add_argument("--quality", choices=list(config.MODEL_PROFILES), default=config.DEFAULT_QUALITY,
+                    # Perfil de calidad del modelo
                     help="accurate: YOLO26s 640, prioriza reconocimiento; detail: YOLOv8n 480; fast: YOLOv8n 320")
     ap.add_argument("--stationery-model", type=Path, metavar="DIR",
                     help="otro detector de útiles: directorio OpenVINO en CPU o pesos .pt en CUDA")

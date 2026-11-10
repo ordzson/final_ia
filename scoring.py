@@ -12,7 +12,8 @@ class PresenceTracker:
         self.enter_s = enter_s
         self.hold_s = hold_s
         self.reset()
-
+ #Se puede usar para contar objetos que entran y salen de la vista, 
+ # como lápices y cuadernos, sin que el parpadeo de la detección afecte el puntaje.
     def update(self, keys: set[str], now: float) -> tuple[set[str], set[str]]:
         """Devuelve (present, entered). entered = claves que pasaron de ausente a presente en esta llamada."""
         for k in keys:
@@ -75,6 +76,7 @@ class UniScorer:
             return self._snapshot(now, present_set, entered_set)
         # Solo un objeto que entra arranca la ronda: los que siguen a la vista desde la anterior no
         # la reinician solos (si no, con todo en cuadro las rondas se encadenarían sin fin)
+        #controla la fase de la ronda: waiting, running, result
         if self._phase == "waiting" and entered_set:
             self._phase, self._start = "running", now
         new: set[str] = set()

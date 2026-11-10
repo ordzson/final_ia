@@ -94,6 +94,7 @@
 				</port>
 			</output>
 		</layer>
+		#Activación
 		<layer id="6" name="__module.model.22.cv3.2.1.act/aten::silu_/Swish" type="Swish" version="opset4">
 			<input>
 				<port id="0" precision="FP32">
